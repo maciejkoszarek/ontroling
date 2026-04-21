@@ -1,0 +1,136 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 248 250 252;
+  --bg-card: 255 255 255;
+  --bg-hover: 241 245 249;
+  --bg-muted: 241 245 249;
+  --fg: 15 23 42;
+  --fg-muted: 71 85 105;
+  --fg-subtle: 148 163 184;
+  --border: 226 232 240;
+  --border-strong: 203 213 225;
+  --brand: 37 99 235;
+  --brand-fg: 255 255 255;
+  --brand-subtle: 219 234 254;
+  --success: 22 163 74;
+  --warning: 217 119 6;
+  --danger: 220 38 38;
+}
+
+.dark {
+  --bg: 2 6 23;
+  --bg-card: 15 23 42;
+  --bg-hover: 30 41 59;
+  --bg-muted: 30 41 59;
+  --fg: 241 245 249;
+  --fg-muted: 148 163 184;
+  --fg-subtle: 100 116 139;
+  --border: 30 41 59;
+  --border-strong: 51 65 85;
+  --brand: 96 165 250;
+  --brand-fg: 15 23 42;
+  --brand-subtle: 30 58 138;
+  --success: 34 197 94;
+  --warning: 245 158 11;
+  --danger: 239 68 68;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-bg text-fg antialiased;
+  font-feature-settings: "cv11", "ss01", "ss03";
+}
+
+/* scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--border-strong)) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgb(var(--border-strong));
+  border-radius: 8px;
+  border: 2px solid rgb(var(--bg));
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--fg-subtle));
+}
+
+/* reusable utility classes */
+@layer components {
+  .card {
+    @apply bg-bg-card border border-border rounded-xl shadow-card;
+  }
+  .btn {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-border bg-bg-card hover:bg-bg-hover transition-colors;
+  }
+  .btn-primary {
+    @apply btn border-brand bg-brand text-brand-foreground hover:opacity-90;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center gap-1.5 px-2 py-1 text-sm rounded-md hover:bg-bg-hover text-fg-muted hover:text-fg transition-colors;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border border-border bg-bg-muted text-fg-muted;
+  }
+  .pill {
+    @apply inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-full;
+  }
+  .pill-success {
+    @apply pill bg-success/10 text-success;
+  }
+  .pill-warning {
+    @apply pill bg-warning/10 text-warning;
+  }
+  .pill-danger {
+    @apply pill bg-danger/10 text-danger;
+  }
+  .pill-brand {
+    @apply pill bg-brand/10 text-brand;
+  }
+  .input {
+    @apply w-full px-2.5 py-1.5 text-sm rounded-md border border-border bg-bg-card focus:outline-none focus:ring-2 focus:ring-brand/40 focus:border-brand;
+  }
+  .kbd {
+    @apply inline-flex items-center px-1.5 py-0.5 text-[11px] font-mono rounded border border-border bg-bg-muted text-fg-muted;
+  }
+  .nav-link {
+    @apply flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg text-fg-muted hover:bg-bg-hover hover:text-fg transition-colors;
+  }
+  .nav-link.active {
+    @apply bg-brand/10 text-brand font-medium;
+  }
+  .section-title {
+    @apply text-[13px] font-semibold uppercase tracking-wider text-fg-subtle;
+  }
+  .table-th {
+    @apply sticky top-0 z-10 bg-bg-card border-b border-border px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-fg-muted text-left;
+  }
+  .table-td {
+    @apply border-b border-border/60 px-2.5 py-1.5 text-sm;
+  }
+}
+
+/* grid editing cell */
+.grid-cell-edit {
+  @apply outline-none ring-2 ring-brand/50 bg-brand/5;
+}
+
+/* ECharts tooltip adjustments */
+.echarts-tooltip {
+  font-family: inherit !important;
+}
