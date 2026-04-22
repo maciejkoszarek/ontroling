@@ -23,10 +23,6 @@ export default function Arve() {
 
   const cols = rollingPeriods;
 
-  const cells = leafPuCodes.flatMap((pu) =>
-    cols.map((p) => ({ row: pu, col: p, value: arveAt(pu, p) })),
-  );
-
   function band(v: number): string {
     if (v < 0.65) return "#fecaca";
     if (v < 0.80) return "#fde68a";

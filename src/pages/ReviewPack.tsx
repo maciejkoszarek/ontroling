@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { CheckSquare, Square, FileText, Download, Eye } from "lucide-react";
 import { useAppStore } from "../store";
-import { periodLabel } from "../lib/utils";
 
 const SCREENS = [
   { id: "cockpit", label: "Cockpit (KPIs + trend)", default: true },

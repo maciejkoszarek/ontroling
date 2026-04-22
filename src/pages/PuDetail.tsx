@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { CheckCircle2, History, Info, Layers, PieChart, Send, Sparkles, Zap, GraduationCap, Users } from "lucide-react";
 import { useAppStore } from "../store";
 import { leafPuCodes, puByCode, rollingPeriods, currentPeriod as currentPeriodConst, puLabel, sePuCodes, vacationPhasingFor } from "../lib/demoData";
-import MetricGrid, { GridCellValue, MetricRow } from "../components/MetricGrid";
+import MetricGrid, { type GridCellValue, type MetricRow } from "../components/MetricGrid";
 import CommentFeed from "../components/CommentFeed";
 import KpiCard from "../components/KpiCard";
 import TrendChart from "../components/TrendChart";
@@ -107,7 +107,7 @@ export default function PuDetail() {
   const idx = useMemo(() => new ForecastIndex(forecastCells), [forecastCells]);
 
   if (!pu) {
-    return <div className="card p-6 text-sm">PU "{code}" not found.</div>;
+    return <div className="card p-6 text-sm">PU &quot;{code}&quot; not found.</div>;
   }
 
   const isVirtual = pu.isVirtual === true;

@@ -19,7 +19,6 @@ import {
   Settings,
   Moon,
   Sun,
-  Bell,
   Sparkles,
 } from "lucide-react";
 import { useAppStore } from "../store";

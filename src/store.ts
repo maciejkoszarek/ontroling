@@ -7,7 +7,6 @@ import type {
   BudgetCell,
   Comment,
   ContractOfMandate,
-  CycleStatus,
   DQCheckResult,
   Employee,
   EmployeeMonthSnapshot,

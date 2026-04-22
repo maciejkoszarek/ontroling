@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useAppStore } from "../store";
-import { leafPuCodes, rollingPeriods, currentPeriod, puLabel } from "../lib/demoData";
+import { leafPuCodes, rollingPeriods, puLabel } from "../lib/demoData";
 import { ForecastIndex, indexBudget } from "../lib/forecast";
 import Heatmap from "../components/Heatmap";
 import { formatDelta, formatNumber, periodLabel } from "../lib/utils";

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowRightLeft, UserMinus, UserPlus } from "lucide-react";
 import { useAppStore } from "../store";
-import { leafPuCodes, rollingPeriods, currentPeriod, puLabel } from "../lib/demoData";
+import { rollingPeriods, currentPeriod, puLabel } from "../lib/demoData";
 import KpiCard from "../components/KpiCard";
 import TrendChart from "../components/TrendChart";
 import { periodAdd, periodLabel } from "../lib/utils";

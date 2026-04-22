@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { useAppStore } from "../store";
-import { puLabel, rollingPeriods, currentPeriod } from "../lib/demoData";
-import { ForecastIndex } from "../lib/forecast";
+import { puLabel, currentPeriod } from "../lib/demoData";
 import { formatPct, formatNumber, periodAdd } from "../lib/utils";
 import { Sparkles } from "lucide-react";
 

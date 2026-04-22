@@ -154,7 +154,7 @@ function EditableCell({
   cell,
   pad,
   row,
-  period,
+  period: _period,
   isActual,
   onChange,
   onContextMenu,
@@ -187,7 +187,7 @@ function EditableCell({
   const canEdit = !!onChange && !isActual;
 
   function commit() {
-    const n = Number(draft.replace(/[^\d.\-]/g, ""));
+    const n = Number(draft.replace(/[^\d.-]/g, ""));
     if (!isNaN(n) && onChange) onChange(format === "pct" ? n / 100 : n);
     setEditing(false);
   }
