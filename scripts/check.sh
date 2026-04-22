@@ -13,10 +13,6 @@ echo "▶ lint"
 npm run --silent lint
 
 echo "▶ test"
-if npm run --silent 2>/dev/null | grep -q '  test$'; then
-  npm run --silent test
-else
-  echo "  (test script not wired yet — skipping)"
-fi
+npm run --silent test
 
 echo "✓ all checks passed"
