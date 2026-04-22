@@ -1,11 +1,119 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAppStore } from "../store";
-import { ArrowLeft, ArrowRightLeft, Briefcase, MapPin, User, UserMinus, X } from "lucide-react";
-import { formatPct, formatNumber } from "../lib/utils";
+import { ArrowLeft, ArrowRightLeft, Briefcase, MapPin, Pencil, Plus, User, UserMinus, X } from "lucide-react";
+import { cn, formatPct, formatNumber } from "../lib/utils";
 import { puLabel, puDisplay, rollingPeriods } from "../lib/demoData";
 import ReactECharts from "echarts-for-react";
 import { AddLeaverModal, AssignProjectModal, TransferModal } from "../components/forms/PeopleForms";
+
+const HOURS_PER_FTE = 160;
+
+function EditableHourCell({
+  hours,
+  unit,
+  isCurrentMonth,
+  isFuture,
+  onCommit,
+}: {
+  hours: number;
+  unit: "hours" | "fte";
+  isCurrentMonth?: boolean;
+  isFuture?: boolean;
+  onCommit: (raw: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  const display =
+    hours === 0
+      ? ""
+      : unit === "hours"
+      ? formatNumber(hours, 0)
+      : formatNumber(hours / HOURS_PER_FTE, 2);
+  const fte = hours / HOURS_PER_FTE;
+
+  function startEdit() {
+    if (editing) return;
+    setDraft(
+      hours === 0 ? "" : unit === "hours" ? String(hours) : (hours / HOURS_PER_FTE).toFixed(2),
+    );
+    setEditing(true);
+  }
+
+  function commit() {
+    onCommit(draft);
+    setEditing(false);
+  }
+
+  const bg = isCurrentMonth ? "bg-brand/10" : isFuture ? "bg-brand/[0.03]" : "";
+
+  if (editing) {
+    return (
+      <td className={cn("table-td p-0", bg)}>
+        <div className="relative ring-2 ring-brand ring-inset bg-bg-card">
+          <input
+            ref={inputRef}
+            type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit();
+              if (e.key === "Escape") setEditing(false);
+            }}
+            className="w-full text-right tabular-nums px-2 py-1.5 bg-transparent focus:outline-none text-sm"
+            placeholder={unit === "hours" ? "hours" : "FTE"}
+          />
+          <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[9px] font-mono text-brand pointer-events-none bg-bg-card px-1">
+            {unit === "hours" ? "h" : "fte"}
+          </span>
+        </div>
+      </td>
+    );
+  }
+
+  return (
+    <td
+      className={cn(
+        "table-td text-right tabular-nums p-0",
+        bg,
+      )}
+      title={hours > 0 ? `${formatNumber(hours, 0)} h · ${formatNumber(fte, 2)} FTE — click to edit` : "Click to add hours"}
+    >
+      <button
+        type="button"
+        onClick={startEdit}
+        className={cn(
+          "relative w-full h-full px-2 py-1.5 text-right transition group/cell",
+          "hover:bg-brand/10 hover:ring-1 hover:ring-brand/60 hover:ring-inset",
+          "focus:outline-none focus:ring-2 focus:ring-brand focus:ring-inset",
+          hours > 0 && fte >= 0.9 && "text-brand font-medium",
+          hours === 0 && "text-fg-subtle",
+        )}
+      >
+        {hours === 0 ? (
+          <span className="inline-flex items-center justify-end gap-1">
+            <span className="group-hover/cell:hidden">—</span>
+            <Plus className="w-3 h-3 hidden group-hover/cell:inline text-brand" />
+          </span>
+        ) : (
+          <span className="inline-flex items-center justify-end gap-1">
+            <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/cell:opacity-60 text-brand" />
+            <span className="border-b border-dashed border-transparent group-hover/cell:border-brand/40 transition-colors">
+              {display}
+            </span>
+          </span>
+        )}
+      </button>
+    </td>
+  );
+}
 
 export default function PersonDetail() {
   const { localNumber = "" } = useParams<{ localNumber: string }>();
@@ -15,8 +123,10 @@ export default function PersonDetail() {
   const projects = useAppStore((s) => s.projects);
   const locations = useAppStore((s) => s.locations);
   const unassign = useAppStore((s) => s.unassignEmployeeFromProject);
+  const assign = useAppStore((s) => s.assignEmployeeToProject);
   const transfers = useAppStore((s) => s.transfers);
   const [modal, setModal] = useState<null | "transfer" | "leaver" | "assign">(null);
+  const [showUnit, setShowUnit] = useState<"hours" | "fte">("hours");
 
   const employee = employees.find((e) => e.localNumber === localNumber);
 
@@ -47,17 +157,12 @@ export default function PersonDetail() {
     return s ? Math.round(s.arve * 1000) / 10 : 0;
   });
 
-  // Project history: projectNumber -> totalHours
-  const projTotals = new Map<string, number>();
-  for (const g of personHours) projTotals.set(g.projectNumber, (projTotals.get(g.projectNumber) ?? 0) + g.hours);
-  const projectList = Array.from(projTotals.entries())
-    .sort((a, b) => b[1] - a[1])
-    .map(([pn, hours]) => ({ proj: projByNumber.get(pn), pn, hours }));
-
   // Per-month per-project hours matrix (last 12 months visible)
   const horizon = rollingPeriods.slice(-12);
   const projectMatrix = new Map<string, Map<string, number>>();
+  const projTotals = new Map<string, number>();
   for (const g of personHours) {
+    projTotals.set(g.projectNumber, (projTotals.get(g.projectNumber) ?? 0) + g.hours);
     if (!horizon.includes(g.period)) continue;
     let row = projectMatrix.get(g.projectNumber);
     if (!row) {
@@ -65,6 +170,37 @@ export default function PersonDetail() {
       projectMatrix.set(g.projectNumber, row);
     }
     row.set(g.period, (row.get(g.period) ?? 0) + g.hours);
+  }
+
+  const nowPeriod = horizon[0];
+  const projectList = Array.from(projTotals.entries())
+    .map(([pn, hours]) => {
+      const proj = projByNumber.get(pn);
+      const row = projectMatrix.get(pn);
+      const nowHours = row?.get(nowPeriod) ?? 0;
+      const horizonHours = horizon.reduce((s, p) => s + (row?.get(p) ?? 0), 0);
+      const isActive = (proj?.status === "active") && horizonHours > 0;
+      return { proj, pn, hours, nowHours, horizonHours, isActive };
+    })
+    .sort((a, b) => {
+      if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+      if (a.nowHours !== b.nowHours) return b.nowHours - a.nowHours;
+      return b.horizonHours - a.horizonHours;
+    });
+
+  function commitHours(pn: string, period: string, raw: string) {
+    const n = Number(raw.replace(",", ".").replace(/[^\d.]/g, ""));
+    const hours = isNaN(n) ? 0 : showUnit === "fte" ? Math.round(n * HOURS_PER_FTE) : Math.round(n);
+    if (hours <= 0) {
+      unassign({ localNumber, projectNumber: pn, period });
+      return;
+    }
+    const existing = gfsHours.find(
+      (g) => g.employeeLocalNumber === localNumber && g.projectNumber === pn && g.period === period,
+    );
+    const proj = projByNumber.get(pn);
+    const projectType = existing?.projectType ?? (proj?.isBillable ? "External Services" : "Management Resource");
+    assign({ localNumber, projectNumber: pn, period, hours, projectType });
   }
 
   const latestArve = personSnaps.length > 0 ? personSnaps[personSnaps.length - 1].arve : 0;
@@ -170,12 +306,35 @@ export default function PersonDetail() {
       </div>
 
       <div className="card p-0 overflow-x-auto">
-        <div className="px-4 py-3">
-          <h2 className="text-sm font-semibold flex items-center gap-2">
-            <Briefcase className="w-4 h-4" />
-            Project assignments
-          </h2>
-          <p className="text-xs text-fg-muted mt-0.5">Last 12 months of GFS_DB staffing (hours).</p>
+        <div className="px-4 py-3 flex items-center justify-between flex-wrap gap-2 border-b border-border">
+          <div>
+            <h2 className="text-sm font-semibold flex items-center gap-2">
+              <Briefcase className="w-4 h-4" />
+              Project assignments
+            </h2>
+            <p className="text-xs text-fg-muted mt-0.5">
+              Click any cell to edit. Active projects appear first. Empty value removes the assignment.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="inline-flex items-center border border-border rounded-md overflow-hidden text-xs">
+              <button
+                className={cn("px-2 py-1", showUnit === "hours" ? "bg-brand text-white" : "hover:bg-bg-muted")}
+                onClick={() => setShowUnit("hours")}
+              >
+                Hours
+              </button>
+              <button
+                className={cn("px-2 py-1", showUnit === "fte" ? "bg-brand text-white" : "hover:bg-bg-muted")}
+                onClick={() => setShowUnit("fte")}
+              >
+                FTE
+              </button>
+            </div>
+            <button className="btn" onClick={() => setModal("assign")}>
+              <Briefcase className="w-3.5 h-3.5" /> Add project
+            </button>
+          </div>
         </div>
         <table className="w-full text-sm">
           <thead>
@@ -183,67 +342,129 @@ export default function PersonDetail() {
               <th className="table-th">Project</th>
               <th className="table-th">MU</th>
               {horizon.map((p) => (
-                <th key={p} className="table-th text-right whitespace-nowrap">{p.slice(5, 7)}/{p.slice(2, 4)}</th>
+                <th
+                  key={p}
+                  className={cn(
+                    "table-th text-right whitespace-nowrap",
+                    p === nowPeriod && "bg-brand/10 text-brand",
+                  )}
+                  title={p}
+                >
+                  {p.slice(5, 7)}/{p.slice(2, 4)}
+                </th>
               ))}
               <th className="table-th text-right">Total</th>
+              <th className="table-th"></th>
             </tr>
           </thead>
           <tbody>
             {projectList.map((pr) => {
               const row = projectMatrix.get(pr.pn);
+              const total = horizon.reduce((s, p) => s + (row?.get(p) ?? 0), 0);
               return (
                 <tr key={pr.pn} className="hover:bg-bg-hover group">
                   <td className="table-td">
-                    <Link to={`/projects/${pr.pn}`} className="hover:text-brand font-medium">
-                      {pr.proj?.name ?? pr.pn}
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      <Link to={`/projects/${pr.pn}`} className="hover:text-brand font-medium">
+                        {pr.proj?.name ?? pr.pn}
+                      </Link>
+                      {pr.isActive && (
+                        <span className="chip !text-[10px] !px-1.5 !py-0 bg-success/10 text-success border-success/20">Active</span>
+                      )}
+                      {pr.proj?.status === "completed" && (
+                        <span className="chip !text-[10px] !px-1.5 !py-0 text-fg-muted">Done</span>
+                      )}
+                    </div>
                     <div className="text-[11px] text-fg-muted">{pr.proj?.customer ?? ""} · <span className="font-mono">{pr.pn}</span></div>
                   </td>
                   <td className="table-td">{pr.proj?.marketUnit ?? ""}</td>
                   {horizon.map((p) => {
                     const h = row?.get(p) ?? 0;
                     return (
-                      <td
+                      <EditableHourCell
                         key={p}
-                        className="table-td text-right tabular-nums group/cell"
-                        title={h > 0 ? "Click to remove this month" : undefined}
-                        onClick={() => {
-                          if (h > 0) unassign({ localNumber, projectNumber: pr.pn, period: p });
-                        }}
-                      >
-                        {h > 0 ? (
-                          <span className="cursor-pointer group-hover/cell:text-danger">{formatNumber(h, 0)}</span>
-                        ) : (
-                          <span className="text-fg-subtle">—</span>
-                        )}
-                      </td>
+                        hours={h}
+                        unit={showUnit}
+                        isCurrentMonth={p === nowPeriod}
+                        isFuture={p > nowPeriod}
+                        onCommit={(raw) => commitHours(pr.pn, p, raw)}
+                      />
                     );
                   })}
                   <td className="table-td text-right tabular-nums font-semibold">
-                    <span className="inline-flex items-center gap-2">
-                      {formatNumber(pr.hours, 0)}
-                      <button
-                        className="btn-ghost opacity-0 group-hover:opacity-100 transition"
-                        title="Remove all assignments for this project"
-                        onClick={() => {
-                          for (const p of horizon) {
-                            if ((row?.get(p) ?? 0) > 0) unassign({ localNumber, projectNumber: pr.pn, period: p });
-                          }
-                        }}
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </span>
+                    {showUnit === "hours" ? formatNumber(total, 0) : formatNumber(total / HOURS_PER_FTE, 2)}
+                  </td>
+                  <td className="table-td text-right">
+                    <button
+                      className="btn-ghost opacity-0 group-hover:opacity-100 transition"
+                      title="Remove all assignments for this project"
+                      onClick={() => {
+                        for (const p of horizon) {
+                          if ((row?.get(p) ?? 0) > 0) unassign({ localNumber, projectNumber: pr.pn, period: p });
+                        }
+                      }}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
                   </td>
                 </tr>
               );
             })}
             {projectList.length === 0 && (
               <tr>
-                <td colSpan={horizon.length + 3} className="table-td text-center text-fg-muted py-6">No project assignments recorded.</td>
+                <td colSpan={horizon.length + 4} className="table-td text-center text-fg-muted py-6">No project assignments recorded.</td>
               </tr>
             )}
           </tbody>
+          {projectList.length > 0 && (
+            <tfoot>
+              <tr className="border-t-2 border-border bg-bg-muted/40 font-semibold">
+                <td className="table-td" colSpan={2}>
+                  <span className="uppercase text-[11px] tracking-wider text-fg-muted">Total</span>
+                </td>
+                {horizon.map((p) => {
+                  const colTotal = projectList.reduce(
+                    (s, pr) => s + (projectMatrix.get(pr.pn)?.get(p) ?? 0),
+                    0,
+                  );
+                  return (
+                    <td
+                      key={p}
+                      className={cn(
+                        "table-td text-right tabular-nums",
+                        p === nowPeriod && "bg-brand/10 text-brand",
+                        colTotal / HOURS_PER_FTE >= 1 && "text-warning",
+                      )}
+                      title={`${formatNumber(colTotal, 0)} h · ${formatNumber(colTotal / HOURS_PER_FTE, 2)} FTE`}
+                    >
+                      {colTotal === 0
+                        ? "—"
+                        : showUnit === "hours"
+                        ? formatNumber(colTotal, 0)
+                        : formatNumber(colTotal / HOURS_PER_FTE, 2)}
+                    </td>
+                  );
+                })}
+                <td className="table-td text-right tabular-nums">
+                  {(() => {
+                    const grand = projectList.reduce(
+                      (s, pr) =>
+                        s +
+                        horizon.reduce(
+                          (ss, p) => ss + (projectMatrix.get(pr.pn)?.get(p) ?? 0),
+                          0,
+                        ),
+                      0,
+                    );
+                    return showUnit === "hours"
+                      ? formatNumber(grand, 0)
+                      : formatNumber(grand / HOURS_PER_FTE, 2);
+                  })()}
+                </td>
+                <td className="table-td"></td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
     </div>
