@@ -2,8 +2,10 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAppStore } from "../store";
 import { formatNumber } from "../lib/utils";
-import { Briefcase, Search, ChevronRight } from "lucide-react";
+import { Briefcase, Search, ChevronRight, Plus, Pencil } from "lucide-react";
 import { aggregateProjects, year2026Periods } from "../lib/projectHelpers";
+import { ProjectFormModal } from "../components/forms/ProjectForms";
+import type { Project } from "../types";
 
 export default function Projects() {
   const projects = useAppStore((s) => s.projects);
@@ -13,6 +15,9 @@ export default function Projects() {
   const [q, setQ] = useState("");
   const [mu, setMu] = useState<string>("");
   const [billable, setBillable] = useState<"all" | "billable" | "overhead">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "completed">("all");
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Project | undefined>(undefined);
 
   const periods = year2026Periods();
   const aggMap = useMemo(() => aggregateProjects(gfsHours, snapshots), [gfsHours, snapshots]);
@@ -22,8 +27,20 @@ export default function Projects() {
     if (mu && p.marketUnit !== mu) return false;
     if (billable === "billable" && !p.isBillable) return false;
     if (billable === "overhead" && p.isBillable) return false;
+    if (statusFilter === "active" && p.status !== "active") return false;
+    if (statusFilter === "completed" && p.status !== "completed") return false;
     return true;
   });
+
+  function openNew() {
+    setEditing(undefined);
+    setFormOpen(true);
+  }
+
+  function openEdit(p: Project) {
+    setEditing(p);
+    setFormOpen(true);
+  }
 
   return (
     <div className="space-y-4">
@@ -32,6 +49,9 @@ export default function Projects() {
           <h1 className="text-xl font-semibold">Projects</h1>
           <p className="text-sm text-fg-muted">FTE demand aggregated from staffing for full year 2026. Click a project to see assigned people and ARVE.</p>
         </div>
+        <button className="btn-primary flex items-center gap-1.5" onClick={openNew}>
+          <Plus className="w-4 h-4" /> New project
+        </button>
       </div>
 
       <div className="card p-3 flex items-center gap-2 flex-wrap">
@@ -57,6 +77,17 @@ export default function Projects() {
             </button>
           ))}
         </div>
+        <div className="flex items-center gap-1">
+          {(["all", "active", "completed"] as const).map((o) => (
+            <button
+              key={o}
+              className={statusFilter === o ? "pill-brand" : "chip"}
+              onClick={() => setStatusFilter(o)}
+            >
+              {o}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="card p-0 overflow-x-auto">
@@ -65,6 +96,7 @@ export default function Projects() {
             <tr>
               <th className="table-th sticky left-0 bg-bg z-10 min-w-[260px]">Project</th>
               <th className="table-th">MU</th>
+              <th className="table-th">Billable</th>
               <th className="table-th">Status</th>
               {periods.map((p) => (
                 <th key={p} className="table-th text-right whitespace-nowrap">{p.slice(5, 7)}/26</th>
@@ -92,6 +124,19 @@ export default function Projects() {
                       {p.isBillable ? "billable" : "overhead"}
                     </span>
                   </td>
+                  <td className="table-td">
+                    <span
+                      className={
+                        p.status === "active"
+                          ? "pill-brand"
+                          : p.status === "completed"
+                            ? "chip"
+                            : "chip opacity-70"
+                      }
+                    >
+                      {p.status}
+                    </span>
+                  </td>
                   {periods.map((period) => {
                     const agg = aggMap.get(`${p.projectNumber}::${period}`);
                     const fte = agg?.fte ?? 0;
@@ -102,9 +147,18 @@ export default function Projects() {
                     );
                   })}
                   <td className="table-td">
-                    <Link to={`/projects/${p.projectNumber}`} className="text-fg-muted hover:text-brand">
-                      <ChevronRight className="w-4 h-4" />
-                    </Link>
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        className="btn-ghost"
+                        onClick={() => openEdit(p)}
+                        title="Edit project"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <Link to={`/projects/${p.projectNumber}`} className="text-fg-muted hover:text-brand">
+                        <ChevronRight className="w-4 h-4" />
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               );
@@ -112,6 +166,8 @@ export default function Projects() {
           </tbody>
         </table>
       </div>
+
+      <ProjectFormModal open={formOpen} onClose={() => setFormOpen(false)} editing={editing} />
     </div>
   );
 }

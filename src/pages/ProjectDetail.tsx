@@ -1,13 +1,14 @@
-import { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAppStore } from "../store";
 import { aggregateProjects, year2026Periods, employeeMap } from "../lib/projectHelpers";
 import { cn, formatNumber, formatPct } from "../lib/utils";
-import { ArrowLeft, Briefcase, Building2, Users, UserPlus, X } from "lucide-react";
+import { ArrowLeft, ArrowDown, ArrowUp, Briefcase, Building2, ChevronDown, ChevronRight, Users, UserPlus, Pencil } from "lucide-react";
 import ReactECharts from "echarts-for-react";
 import KpiCard from "../components/KpiCard";
 import { currentPeriod, puLabel } from "../lib/demoData";
 import { AssignProjectModal } from "../components/forms/PeopleForms";
+import { ProjectFormModal } from "../components/forms/ProjectForms";
 
 const HOURS_PER_FTE = 160;
 const PERIODS = year2026Periods();
@@ -21,13 +22,57 @@ export default function ProjectDetail() {
   const employees = useAppStore((s) => s.employees);
 
   const unassign = useAppStore((s) => s.unassignEmployeeFromProject);
+  const assign = useAppStore((s) => s.assignEmployeeToProject);
   const project = projects.find((p) => p.projectNumber === projectNumber);
   const periods = PERIODS;
   const aggMap = useMemo(() => aggregateProjects(gfsHours, snapshots), [gfsHours, snapshots]);
   const empMap = useMemo(() => employeeMap(employees), [employees]);
   const [selectedPeriod, setSelectedPeriod] = useState(currentPeriod);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [showUnit, setShowUnit] = useState<"hours" | "fte">("hours");
+  const [editingCell, setEditingCell] = useState<{ localNumber: string; period: string } | null>(null);
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [groupBy, setGroupBy] = useState<"none" | "pu" | "grade" | "puGrade">("none");
+  const [puFilter, setPuFilter] = useState("all");
+  const [gradeFilter, setGradeFilter] = useState("all");
+  const [nameSearch, setNameSearch] = useState("");
+  const [sortKey, setSortKey] = useState<"name" | "pu" | "grade" | "total" | "months" | `m${number}`>("total");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (editingCell) inputRef.current?.focus();
+  }, [editingCell]);
+
+  const beginEdit = (localNumber: string, period: string, hours: number) => {
+    setEditingCell({ localNumber, period });
+    const v = showUnit === "hours" ? hours : hours / HOURS_PER_FTE;
+    setDraft(v > 0 ? (showUnit === "hours" ? String(Math.round(v)) : v.toFixed(2)) : "");
+  };
+  const commitEdit = () => {
+    if (!editingCell || !project) return;
+    const raw = draft.trim().replace(",", ".");
+    const num = raw === "" ? 0 : Number(raw);
+    if (!Number.isFinite(num) || num < 0) {
+      setEditingCell(null);
+      return;
+    }
+    const hours = showUnit === "hours" ? num : num * HOURS_PER_FTE;
+    if (hours <= 0) {
+      unassign({ localNumber: editingCell.localNumber, projectNumber: project.projectNumber, period: editingCell.period });
+    } else {
+      assign({
+        localNumber: editingCell.localNumber,
+        projectNumber: project.projectNumber,
+        period: editingCell.period,
+        hours,
+        projectType: project.isBillable ? "DEL" : "INT",
+      });
+    }
+    setEditingCell(null);
+  };
+  const cancelEdit = () => setEditingCell(null);
 
   const monthly = useMemo(() => {
     if (!project) return [];
@@ -66,9 +111,122 @@ export default function ProjectDetail() {
         const activeMonths = periods.filter((p) => (byPeriod.get(p) ?? 0) > 0).length;
         return { localNumber: ln, e, byPeriod, total, activeMonths };
       })
-      .filter((r) => r.e)
-      .sort((a, b) => b.total - a.total);
+      .filter((r) => r.e);
   }, [aggMap, project, empMap, periods]);
+
+  const distinctPus = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of personMatrix) if (r.e) set.add(r.e.puCode);
+    return [...set].sort((a, b) => puLabel(a).localeCompare(puLabel(b)));
+  }, [personMatrix]);
+  const distinctGrades = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of personMatrix) if (r.e) set.add(r.e.gradeCode);
+    return [...set].sort();
+  }, [personMatrix]);
+
+  const filteredMatrix = useMemo(() => {
+    const q = nameSearch.trim().toLowerCase();
+    return personMatrix.filter((r) => {
+      const e = r.e!;
+      if (puFilter !== "all" && e.puCode !== puFilter) return false;
+      if (gradeFilter !== "all" && e.gradeCode !== gradeFilter) return false;
+      if (q && !e.displayName.toLowerCase().includes(q) && !e.localNumber.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [personMatrix, puFilter, gradeFilter, nameSearch]);
+
+  const sortedMatrix = useMemo(() => {
+    const rows = [...filteredMatrix];
+    const dir = sortDir === "asc" ? 1 : -1;
+    rows.sort((a, b) => {
+      const ae = a.e!, be = b.e!;
+      let cmp = 0;
+      if (sortKey === "name") cmp = ae.displayName.localeCompare(be.displayName);
+      else if (sortKey === "pu") cmp = puLabel(ae.puCode).localeCompare(puLabel(be.puCode));
+      else if (sortKey === "grade") cmp = ae.gradeCode.localeCompare(be.gradeCode);
+      else if (sortKey === "total") cmp = a.total - b.total;
+      else if (sortKey === "months") cmp = a.activeMonths - b.activeMonths;
+      else if (sortKey.startsWith("m")) {
+        const idx = Number(sortKey.slice(1));
+        const p = periods[idx];
+        cmp = (a.byPeriod.get(p) ?? 0) - (b.byPeriod.get(p) ?? 0);
+      }
+      if (cmp === 0) cmp = b.total - a.total;
+      return cmp * dir;
+    });
+    return rows;
+  }, [filteredMatrix, sortKey, sortDir, periods]);
+
+  type Group = {
+    key: string;
+    label: string;
+    rows: typeof sortedMatrix;
+    subBy: Map<string, number>;
+    subTotal: number;
+    subPeople: number;
+  };
+  const groups: Group[] = useMemo(() => {
+    const keyOf = (e: NonNullable<typeof sortedMatrix[number]["e"]>) => {
+      if (groupBy === "pu") return e.puCode;
+      if (groupBy === "grade") return e.gradeCode;
+      if (groupBy === "puGrade") return `${e.puCode}::${e.gradeCode}`;
+      return "_all";
+    };
+    const labelOf = (k: string) => {
+      if (groupBy === "pu") return puLabel(k);
+      if (groupBy === "grade") return `Grade ${k}`;
+      if (groupBy === "puGrade") {
+        const [pu, g] = k.split("::");
+        return `${puLabel(pu)} · ${g}`;
+      }
+      return "All people";
+    };
+    const map = new Map<string, typeof sortedMatrix>();
+    for (const r of sortedMatrix) {
+      const k = keyOf(r.e!);
+      let arr = map.get(k);
+      if (!arr) { arr = []; map.set(k, arr); }
+      arr.push(r);
+    }
+    const out: Group[] = [];
+    for (const [k, rows] of map.entries()) {
+      const subBy = new Map<string, number>();
+      let subTotal = 0;
+      for (const r of rows) {
+        for (const p of periods) subBy.set(p, (subBy.get(p) ?? 0) + (r.byPeriod.get(p) ?? 0));
+        subTotal += r.total;
+      }
+      out.push({ key: k, label: labelOf(k), rows, subBy, subTotal, subPeople: rows.length });
+    }
+    out.sort((a, b) => a.label.localeCompare(b.label));
+    return out;
+  }, [sortedMatrix, groupBy, periods]);
+
+  const grandBy = useMemo(() => {
+    const m = new Map<string, number>();
+    let total = 0;
+    for (const g of groups) {
+      for (const p of periods) m.set(p, (m.get(p) ?? 0) + (g.subBy.get(p) ?? 0));
+      total += g.subTotal;
+    }
+    return { byPeriod: m, total, people: groups.reduce((s, g) => s + g.subPeople, 0) };
+  }, [groups, periods]);
+
+  const toggleSort = (k: typeof sortKey) => {
+    if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(k); setSortDir(k === "name" || k === "pu" || k === "grade" ? "asc" : "desc"); }
+  };
+  const sortIcon = (k: typeof sortKey) =>
+    sortKey === k ? (sortDir === "asc" ? <ArrowUp className="inline w-3 h-3 ml-1" /> : <ArrowDown className="inline w-3 h-3 ml-1" />) : null;
+  const toggleGroup = (k: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      return next;
+    });
+  };
+  const fmtCell = (hours: number) => showUnit === "hours" ? formatNumber(hours, 0) : formatNumber(hours / HOURS_PER_FTE, 2);
 
   if (!project) {
     return (
@@ -132,9 +290,23 @@ export default function ProjectDetail() {
             <span className={project.isBillable ? "pill-success" : "chip"}>
               {project.isBillable ? "billable" : "overhead"}
             </span>
+            <span
+              className={
+                project.status === "active"
+                  ? "pill-brand"
+                  : project.status === "completed"
+                    ? "chip"
+                    : "chip opacity-70"
+              }
+            >
+              {project.status}
+            </span>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button className="btn" onClick={() => setEditOpen(true)}>
+            <Pencil className="w-4 h-4" /> Edit
+          </button>
           <button className="btn-primary" onClick={() => setAssignOpen(true)}>
             <UserPlus className="w-4 h-4" /> Assign person
           </button>
@@ -152,6 +324,15 @@ export default function ProjectDetail() {
         onClose={() => setAssignOpen(false)}
         preselectProjectNumber={project.projectNumber}
       />
+
+      <ProjectFormModal open={editOpen} onClose={() => setEditOpen(false)} editing={project} />
+
+      {project.description && (
+        <div className="card p-4">
+          <h2 className="text-sm font-semibold mb-1.5">Description</h2>
+          <p className="text-sm text-fg-muted whitespace-pre-wrap">{project.description}</p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard label={`FTE · ${selectedPeriod}`} value={totalFteCurrent} fractionDigits={1} />
@@ -257,85 +438,191 @@ export default function ProjectDetail() {
                 FTE
               </button>
             </div>
-            <p className="text-xs text-fg-muted">Click a cell in the selected month to unassign.</p>
+            <p className="text-xs text-fg-muted">Click any cell to edit; clear the value or enter 0 to unassign.</p>
           </div>
+        </div>
+        <div className="px-4 py-2 flex flex-wrap items-center gap-2 border-b border-border bg-bg-muted/40">
+          <input
+            className="input !w-52 text-xs"
+            placeholder="Search by name or ID…"
+            value={nameSearch}
+            onChange={(e) => setNameSearch(e.target.value)}
+          />
+          <label className="text-xs text-fg-muted">PU</label>
+          <select className="input !w-auto text-xs" value={puFilter} onChange={(e) => setPuFilter(e.target.value)}>
+            <option value="all">All PUs</option>
+            {distinctPus.map((pu) => <option key={pu} value={pu}>{puLabel(pu)}</option>)}
+          </select>
+          <label className="text-xs text-fg-muted">Grade</label>
+          <select className="input !w-auto text-xs" value={gradeFilter} onChange={(e) => setGradeFilter(e.target.value)}>
+            <option value="all">All grades</option>
+            {distinctGrades.map((g) => <option key={g} value={g}>{g}</option>)}
+          </select>
+          <label className="text-xs text-fg-muted">Group by</label>
+          <select className="input !w-auto text-xs" value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)}>
+            <option value="none">None</option>
+            <option value="pu">PU</option>
+            <option value="grade">Grade</option>
+            <option value="puGrade">PU + Grade</option>
+          </select>
+          <span className="text-xs text-fg-muted ml-auto">
+            {grandBy.people} / {personMatrix.length} people
+            {(puFilter !== "all" || gradeFilter !== "all" || nameSearch.trim()) && (
+              <button className="ml-2 underline hover:text-brand" onClick={() => { setPuFilter("all"); setGradeFilter("all"); setNameSearch(""); }}>
+                clear
+              </button>
+            )}
+          </span>
         </div>
         <table className="w-full text-xs">
           <thead>
             <tr>
-              <th className="table-th text-left sticky left-0 bg-bg-card z-10" style={{ minWidth: 240 }}>Person</th>
-              <th className="table-th text-left">PU · Grade</th>
-              {periods.map((p) => (
+              <th
+                className="table-th text-left sticky left-0 bg-bg-card z-10 cursor-pointer hover:bg-brand/5"
+                style={{ minWidth: 240 }}
+                onClick={() => toggleSort("name")}
+              >
+                Person{sortIcon("name")}
+              </th>
+              <th className="table-th text-left cursor-pointer hover:bg-brand/5" onClick={() => toggleSort("pu")}>
+                PU{sortIcon("pu")}
+                <span className="mx-1 text-fg-subtle">·</span>
+                <span onClick={(e) => { e.stopPropagation(); toggleSort("grade"); }} className="hover:text-brand">Grade{sortIcon("grade")}</span>
+              </th>
+              {periods.map((p, i) => (
                 <th
                   key={p}
                   className={cn(
                     "table-th text-right cursor-pointer hover:bg-brand/5",
                     p === selectedPeriod && "bg-brand/10 text-brand",
                   )}
-                  onClick={() => setSelectedPeriod(p)}
+                  onClick={() => { setSelectedPeriod(p); toggleSort(`m${i}` as typeof sortKey); }}
                   style={{ minWidth: 48 }}
-                  title={p}
+                  title={`${p} — click to sort`}
                 >
-                  {p.slice(5, 7)}
+                  {p.slice(5, 7)}{sortIcon(`m${i}` as typeof sortKey)}
                 </th>
               ))}
-              <th className="table-th text-right" title="Total across 2026">Total</th>
-              <th className="table-th text-right" title="Months with staffing">Months</th>
+              <th className="table-th text-right cursor-pointer hover:bg-brand/5" onClick={() => toggleSort("total")} title="Total across 2026">
+                Total{sortIcon("total")}
+              </th>
+              <th className="table-th text-right cursor-pointer hover:bg-brand/5" onClick={() => toggleSort("months")} title="Months with staffing">
+                Months{sortIcon("months")}
+              </th>
             </tr>
           </thead>
           <tbody>
-            {personMatrix.map((r) => {
-              const e = r.e!;
+            {groups.map((grp) => {
+              const isCollapsed = collapsed.has(grp.key);
+              const showHeader = groupBy !== "none";
               return (
-                <tr key={r.localNumber} className="hover:bg-bg-hover group">
-                  <td className="table-td sticky left-0 bg-bg-card z-10 group-hover:bg-bg-hover">
-                    <Link to={`/people/${e.localNumber}`} className="font-medium hover:text-brand">
-                      {e.displayName}
-                    </Link>
-                    <div className="text-[10px] text-fg-muted font-mono">{e.localNumber}</div>
-                  </td>
-                  <td className="table-td text-fg-muted">
-                    <span>{puLabel(e.puCode)}</span>
-                    <span className="mx-1 text-fg-subtle">·</span>
-                    <span>{e.gradeCode}</span>
-                  </td>
-                  {periods.map((p) => {
-                    const hours = r.byPeriod.get(p) ?? 0;
-                    const fte = hours / HOURS_PER_FTE;
-                    const isSelected = p === selectedPeriod;
-                    const display = hours === 0
-                      ? <span className="text-fg-subtle">—</span>
-                      : showUnit === "hours" ? formatNumber(hours, 0) : formatNumber(fte, 2);
-                    const canUnassign = hours > 0 && isSelected;
-                    return (
-                      <td
-                        key={p}
-                        className={cn(
-                          "table-td text-right tabular-nums relative",
-                          isSelected && "bg-brand/5",
-                          hours > 0 && fte >= 0.9 && "text-brand font-medium",
-                          canUnassign && "cursor-pointer hover:bg-danger/10",
-                        )}
-                        title={hours > 0 ? `${formatNumber(hours, 0)} h · ${formatNumber(fte, 2)} FTE${canUnassign ? " · click to unassign" : ""}` : undefined}
-                        onClick={canUnassign ? () => unassign({ localNumber: e.localNumber, projectNumber: project.projectNumber, period: p }) : undefined}
-                      >
-                        {canUnassign ? (
-                          <span className="inline-flex items-center justify-end gap-1">
-                            {display}
-                            <X className="w-3 h-3 opacity-0 group-hover:opacity-60" />
-                          </span>
-                        ) : display}
+                <React.Fragment key={grp.key}>
+                  {showHeader && (
+                    <tr className="bg-bg-muted/60 font-medium cursor-pointer hover:bg-bg-muted" onClick={() => toggleGroup(grp.key)}>
+                      <td className="table-td sticky left-0 bg-bg-muted/60 z-10" colSpan={2}>
+                        <span className="inline-flex items-center gap-1">
+                          {isCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                          {grp.label}
+                          <span className="chip ml-1">{grp.subPeople}</span>
+                        </span>
                       </td>
+                      {periods.map((p) => (
+                        <td key={p} className={cn("table-td text-right tabular-nums", p === selectedPeriod && "bg-brand/5")}>
+                          {grp.subBy.get(p) ? fmtCell(grp.subBy.get(p) ?? 0) : <span className="text-fg-subtle">—</span>}
+                        </td>
+                      ))}
+                      <td className="table-td text-right tabular-nums">{fmtCell(grp.subTotal)}</td>
+                      <td className="table-td text-right tabular-nums text-fg-muted">
+                        {periods.filter((p) => (grp.subBy.get(p) ?? 0) > 0).length}
+                      </td>
+                    </tr>
+                  )}
+                  {!isCollapsed && grp.rows.map((r) => {
+                    const e = r.e!;
+                    return (
+                      <tr key={r.localNumber} className="hover:bg-bg-hover group">
+                        <td className="table-td sticky left-0 bg-bg-card z-10 group-hover:bg-bg-hover">
+                          <Link to={`/people/${e.localNumber}`} className="font-medium hover:text-brand">
+                            {e.displayName}
+                          </Link>
+                          <div className="text-[10px] text-fg-muted font-mono">{e.localNumber}</div>
+                        </td>
+                        <td className="table-td text-fg-muted">
+                          <span>{puLabel(e.puCode)}</span>
+                          <span className="mx-1 text-fg-subtle">·</span>
+                          <span>{e.gradeCode}</span>
+                        </td>
+                        {periods.map((p) => {
+                          const hours = r.byPeriod.get(p) ?? 0;
+                          const fte = hours / HOURS_PER_FTE;
+                          const isSelected = p === selectedPeriod;
+                          const isEditing = editingCell?.localNumber === e.localNumber && editingCell?.period === p;
+                          const display = hours === 0
+                            ? <span className="text-fg-subtle">—</span>
+                            : showUnit === "hours" ? formatNumber(hours, 0) : formatNumber(fte, 2);
+                          return (
+                            <td
+                              key={p}
+                              className={cn(
+                                "table-td text-right tabular-nums relative cursor-pointer hover:bg-brand/10",
+                                isSelected && "bg-brand/5",
+                                hours > 0 && fte >= 0.9 && "text-brand font-medium",
+                                isEditing && "bg-brand/10 p-0",
+                              )}
+                              title={hours > 0
+                                ? `${formatNumber(hours, 0)} h · ${formatNumber(fte, 2)} FTE · click to edit`
+                                : "click to assign"}
+                              onClick={() => {
+                                setSelectedPeriod(p);
+                                if (!isEditing) beginEdit(e.localNumber, p, hours);
+                              }}
+                            >
+                              {isEditing ? (
+                                <input
+                                  ref={inputRef}
+                                  className="w-full text-right tabular-nums bg-transparent outline-none px-2 py-1 border border-brand rounded"
+                                  value={draft}
+                                  onChange={(ev) => setDraft(ev.target.value)}
+                                  onBlur={commitEdit}
+                                  onClick={(ev) => ev.stopPropagation()}
+                                  onKeyDown={(ev) => {
+                                    if (ev.key === "Enter") { ev.preventDefault(); commitEdit(); }
+                                    else if (ev.key === "Escape") { ev.preventDefault(); cancelEdit(); }
+                                  }}
+                                  inputMode="decimal"
+                                  placeholder={showUnit === "hours" ? "h" : "FTE"}
+                                />
+                              ) : display}
+                            </td>
+                          );
+                        })}
+                        <td className="table-td text-right tabular-nums font-medium">
+                          {showUnit === "hours" ? formatNumber(r.total, 0) : formatNumber(r.total / HOURS_PER_FTE, 2)}
+                        </td>
+                        <td className="table-td text-right tabular-nums text-fg-muted">{r.activeMonths}</td>
+                      </tr>
                     );
                   })}
-                  <td className="table-td text-right tabular-nums font-medium">
-                    {showUnit === "hours" ? formatNumber(r.total, 0) : formatNumber(r.total / HOURS_PER_FTE, 2)}
-                  </td>
-                  <td className="table-td text-right tabular-nums text-fg-muted">{r.activeMonths}</td>
-                </tr>
+                </React.Fragment>
               );
             })}
-            {personMatrix.length === 0 && (
+            {groups.length > 0 && (
+              <tr className="bg-bg-muted font-semibold border-t-2 border-border">
+                <td className="table-td sticky left-0 bg-bg-muted z-10" colSpan={2}>
+                  Grand total <span className="chip ml-1">{grandBy.people}</span>
+                </td>
+                {periods.map((p) => (
+                  <td key={p} className={cn("table-td text-right tabular-nums", p === selectedPeriod && "bg-brand/10")}>
+                    {grandBy.byPeriod.get(p) ? fmtCell(grandBy.byPeriod.get(p) ?? 0) : <span className="text-fg-subtle">—</span>}
+                  </td>
+                ))}
+                <td className="table-td text-right tabular-nums">{fmtCell(grandBy.total)}</td>
+                <td className="table-td text-right tabular-nums text-fg-muted">
+                  {periods.filter((p) => (grandBy.byPeriod.get(p) ?? 0) > 0).length}
+                </td>
+              </tr>
+            )}
+            {groups.length === 0 && (
               <tr>
                 <td colSpan={periods.length + 4} className="table-td text-center text-fg-muted py-6">
                   No staffing recorded for 2026.

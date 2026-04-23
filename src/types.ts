@@ -48,6 +48,15 @@ export interface Project {
   startDate?: string;
   endDate?: string;
   tags: string[];
+  description?: string;
+}
+
+export type ClearanceLevel = "none" | "SU1" | "SU2";
+
+export interface Capability {
+  id: string;
+  name: string;
+  category?: string;
 }
 
 export interface Employee {
@@ -65,6 +74,9 @@ export interface Employee {
   fteCapacity: number;
   engagement: string;
   skills: string[];
+  capabilities?: string[]; // Capability ids
+  germanSpeaker?: boolean;
+  clearanceLevel?: ClearanceLevel;
 }
 
 export interface EmployeeMonthSnapshot {

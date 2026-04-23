@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAppStore } from "../../store";
 import { leafPuCodes, puByCode, rollingPeriods, currentPeriod } from "../../lib/demoData";
 import { uid } from "../../lib/utils";
-import type { Employee, JobFunction, Period } from "../../types";
+import { cn } from "../../lib/utils";
+import type { ClearanceLevel, Employee, JobFunction, Period } from "../../types";
 import Modal, { FieldRow } from "../Modal";
 
 type CommonProps = { open: boolean; onClose: () => void };
@@ -20,6 +21,7 @@ export function AddPersonModal({ open, onClose }: CommonProps) {
   const addEmployee = useAppStore((s) => s.addEmployee);
   const grades = useAppStore((s) => s.grades);
   const locations = useAppStore((s) => s.locations);
+  const capabilitiesCatalog = useAppStore((s) => s.capabilities);
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -32,6 +34,13 @@ export function AddPersonModal({ open, onClose }: CommonProps) {
   const [fteCapacity, setFteCapacity] = useState<number>(1);
   const [engagement, setEngagement] = useState<string>("UoP");
   const [skills, setSkills] = useState<string>("");
+  const [capabilities, setCapabilities] = useState<string[]>([]);
+  const [germanSpeaker, setGermanSpeaker] = useState<boolean>(false);
+  const [clearanceLevel, setClearanceLevel] = useState<ClearanceLevel>("none");
+
+  function toggleCap(id: string) {
+    setCapabilities((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  }
 
   function submit() {
     if (!firstName.trim() || !lastName.trim()) return;
@@ -50,6 +59,9 @@ export function AddPersonModal({ open, onClose }: CommonProps) {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
+      capabilities,
+      germanSpeaker,
+      clearanceLevel,
     });
     onClose();
   }
@@ -125,8 +137,52 @@ export function AddPersonModal({ open, onClose }: CommonProps) {
           <input className="input" value={engagement} onChange={(e) => setEngagement(e.target.value)} />
         </FieldRow>
         <div className="col-span-2">
-          <FieldRow label="Skills" hint="Comma-separated">
+          <FieldRow label="Skills" hint="Free-form, comma-separated">
             <input className="input" value={skills} onChange={(e) => setSkills(e.target.value)} placeholder="React, Node, Java" />
+          </FieldRow>
+        </div>
+        <FieldRow label="German speaker" hint="Relevant for DE / AT / CH market work">
+          <label className="inline-flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={germanSpeaker}
+              onChange={(e) => setGermanSpeaker(e.target.checked)}
+              className="h-4 w-4"
+            />
+            <span>Speaks German</span>
+          </label>
+        </FieldRow>
+        <FieldRow label="Clearance level" hint="Security certification">
+          <select className="input" value={clearanceLevel} onChange={(e) => setClearanceLevel(e.target.value as ClearanceLevel)}>
+            <option value="none">None</option>
+            <option value="SU1">SU1</option>
+            <option value="SU2">SU2</option>
+          </select>
+        </FieldRow>
+        <div className="col-span-2">
+          <FieldRow label="Capabilities" hint="Click chips to toggle">
+            <div className="flex flex-wrap gap-1 max-h-36 overflow-auto border border-border rounded-md p-2">
+              {capabilitiesCatalog.length === 0 && (
+                <span className="text-xs text-fg-muted">No capabilities defined yet — add them on the Capabilities page.</span>
+              )}
+              {capabilitiesCatalog.map((c) => {
+                const on = capabilities.includes(c.id);
+                return (
+                  <button
+                    type="button"
+                    key={c.id}
+                    onClick={() => toggleCap(c.id)}
+                    className={cn(
+                      "chip !text-[11px] cursor-pointer transition-colors",
+                      on ? "bg-brand/15 text-brand border-brand/30" : "opacity-70 hover:opacity-100",
+                    )}
+                    title={c.category}
+                  >
+                    {c.name}
+                  </button>
+                );
+              })}
+            </div>
           </FieldRow>
         </div>
       </div>
@@ -441,6 +497,8 @@ export function TransferModal({
 
 /* -------------------- Assign to project -------------------- */
 
+const HOURS_PER_FTE = 160;
+
 export function AssignProjectModal({
   open,
   onClose,
@@ -455,9 +513,21 @@ export function AssignProjectModal({
   const [localNumber, setLocalNumber] = useState(preselectLocalNumber ?? "");
   const [projectNumber, setProjectNumber] = useState(preselectProjectNumber ?? projects[0]?.projectNumber ?? "");
   const [period, setPeriod] = useState<Period>(currentPeriod);
-  const [hours, setHours] = useState<number>(140);
-  const [projectType, setProjectType] = useState("DEL");
+  const [fte, setFte] = useState<number>(1);
   const [query, setQuery] = useState("");
+
+  // Sync preselected values when the modal opens or the preselect changes.
+  useEffect(() => {
+    if (!open) return;
+    if (preselectLocalNumber) setLocalNumber(preselectLocalNumber);
+    if (preselectProjectNumber) setProjectNumber(preselectProjectNumber);
+    setFte(1);
+    setPeriod(currentPeriod);
+  }, [open, preselectLocalNumber, preselectProjectNumber]);
+
+  const preselectedEmployee = preselectLocalNumber
+    ? employees.find((e) => e.localNumber === preselectLocalNumber)
+    : undefined;
 
   const filteredEmployees = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -467,9 +537,11 @@ export function AssignProjectModal({
       .slice(0, 80);
   }, [active, query]);
 
+  const hours = Math.round(fte * HOURS_PER_FTE);
+
   function submit() {
-    if (!localNumber || !projectNumber || hours <= 0) return;
-    assign({ localNumber, projectNumber, period, hours, projectType });
+    if (!localNumber || !projectNumber || fte <= 0) return;
+    assign({ localNumber, projectNumber, period, hours, projectType: "DEL" });
     onClose();
   }
 
@@ -478,36 +550,43 @@ export function AssignProjectModal({
       open={open}
       onClose={onClose}
       title="Assign to project"
-      subtitle="Upsert project hours for a person in a given month. Drives ARVE and project FTE."
+      subtitle="Upsert monthly FTE for a person on a project. Drives ARVE and project demand."
       footer={
         <>
           <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" onClick={submit} disabled={!localNumber || !projectNumber || hours <= 0}>
+          <button className="btn-primary" onClick={submit} disabled={!localNumber || !projectNumber || fte <= 0}>
             Assign
           </button>
         </>
       }
     >
       <div className="space-y-3">
-        {!preselectLocalNumber && (
-          <FieldRow label="Search employee">
-            <input
-              className="input"
-              placeholder="Name or local number"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </FieldRow>
-        )}
         <FieldRow label="Employee" required>
-          <select className="input" value={localNumber} onChange={(e) => setLocalNumber(e.target.value)}>
-            <option value="">— select —</option>
-            {filteredEmployees.map((e) => (
-              <option key={e.localNumber} value={e.localNumber}>
-                {e.displayName} · {e.localNumber} · {e.puCode}
-              </option>
-            ))}
-          </select>
+          {preselectedEmployee ? (
+            <div className="input flex items-center justify-between bg-bg-muted/60">
+              <span className="font-medium">{preselectedEmployee.displayName}</span>
+              <span className="text-[11px] text-fg-muted font-mono">
+                {preselectedEmployee.localNumber} · {preselectedEmployee.puCode}
+              </span>
+            </div>
+          ) : (
+            <>
+              <input
+                className="input mb-1"
+                placeholder="Search by name or local number…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              <select className="input" value={localNumber} onChange={(e) => setLocalNumber(e.target.value)}>
+                <option value="">— select —</option>
+                {filteredEmployees.map((e) => (
+                  <option key={e.localNumber} value={e.localNumber}>
+                    {e.displayName} · {e.localNumber} · {e.puCode}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
         </FieldRow>
         <FieldRow label="Project" required>
           <select className="input" value={projectNumber} onChange={(e) => setProjectNumber(e.target.value)}>
@@ -518,7 +597,7 @@ export function AssignProjectModal({
             ))}
           </select>
         </FieldRow>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           <FieldRow label="Period" required>
             <select className="input" value={period} onChange={(e) => setPeriod(e.target.value)}>
               {rollingPeriods.map((p) => (
@@ -526,18 +605,16 @@ export function AssignProjectModal({
               ))}
             </select>
           </FieldRow>
-          <FieldRow label="Hours" required hint="Monthly hours on the project">
+          <FieldRow label="FTE" required hint={`= ${hours} h / month (160 h = 1.0 FTE)`}>
             <input
               type="number"
-              step="1"
+              step="0.1"
               min={0}
+              max={1.2}
               className="input"
-              value={hours}
-              onChange={(e) => setHours(parseFloat(e.target.value) || 0)}
+              value={fte}
+              onChange={(e) => setFte(parseFloat(e.target.value) || 0)}
             />
-          </FieldRow>
-          <FieldRow label="Type">
-            <input className="input" value={projectType} onChange={(e) => setProjectType(e.target.value)} />
           </FieldRow>
         </div>
       </div>

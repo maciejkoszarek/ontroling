@@ -25,6 +25,7 @@ import {
   type ProjectDemandForecast,
   type Scenario,
 } from "../types";
+import { realEmployees, realGfsHours, realMarketUnits, realProjects } from "./realData";
 import { periodAdd, periodRange, seededRandom, uid } from "./utils";
 
 // ---------- dimensions ----------
@@ -46,17 +47,7 @@ export const productionUnits: ProductionUnit[] = [
 export const leafPuCodes = productionUnits.filter((p) => !p.isVirtual).map((p) => p.code);
 export const sePuCodes = ["PL01NC03", "PL01NC04", "PL01NC05", "PL01NC06", "PL01NC07"];
 
-export const marketUnits: MarketUnit[] = [
-  { code: "AUTO", displayName: "AUTO", sbu: "GDC PL ABL" },
-  { code: "VW_GROUP", displayName: "VW Group", sbu: "GDC PL ABL" },
-  { code: "MHT", displayName: "MHT", sbu: "GDC PL ABL" },
-  { code: "BANKING", displayName: "Banking & Insurance", sbu: "GDC PL ABL" },
-  { code: "TELCO", displayName: "Telco & Media", sbu: "GDC PL ABL" },
-  { code: "PUBLIC", displayName: "Public Sector", sbu: "GDC PL ABL" },
-  { code: "ENERGY", displayName: "Energy & Utilities", sbu: "GDC PL ABL" },
-  { code: "RETAIL", displayName: "Retail & CPG", sbu: "GDC PL ABL" },
-  { code: "INTERNAL", displayName: "Internal / Overhead", sbu: "GDC PL ABL" },
-];
+export const marketUnits: MarketUnit[] = realMarketUnits;
 
 export const locations: Location[] = [
   { code: "WRO", displayName: "Wrocław – Business Garden K", country: "PL" },
@@ -171,66 +162,18 @@ const lastNames = [
   "Wieczorek", "Jabłoński", "Wróbel", "Majewski", "Olszewski", "Stępień",
 ];
 
-const skillsPool = [
-  "Java", "Spring", "Kotlin", "Python", "AWS", "Azure", "GCP", "Kubernetes", "Terraform",
-  "React", "TypeScript", "Go", "Scala", "Data Eng", "SAP", "DevOps", "SRE", "Architecture",
-  "iOS", "Android", "ML", "Security", "Cloud Native", "Microservices", "Kafka", "SQL",
-];
+// Real employees sourced from ForecastProjectsCCACoreApps_2026.xlsx
+export const employees: Employee[] = realEmployees;
 
-// Headcount distribution per PU (as of current period) — tuned to hit ~670 total
-const hcPerPu: Record<string, number> = {
-  PL01NC01: 14, // Head (management + overhead)
-  PL01NC08: 62, // Cloud Native
-  PL01NC09: 55, // Complex Transformation
-  PL01NC03: 110, // SE1
-  PL01NC04: 118, // SE2
-  PL01NC05: 95, // SE3
-  PL01NC06: 102, // SE4
-  PL01NC07: 90, // SE5
-  PL01NC10: 28, // EEC
-};
+// Headcount distribution per PU derived from real data.
+const hcPerPu: Record<string, number> = employees.reduce<Record<string, number>>((acc, e) => {
+  acc[e.puCode] = (acc[e.puCode] ?? 0) + 1;
+  return acc;
+}, {});
 
 function pick<T>(rnd: () => number, arr: T[]): T {
   return arr[Math.floor(rnd() * arr.length)];
 }
-
-export function generateEmployees(): Employee[] {
-  const rnd = seededRandom("cca-employees-v1");
-  const out: Employee[] = [];
-  let n = 28000;
-  for (const pu of leafPuCodes) {
-    const count = hcPerPu[pu] ?? 0;
-    for (let i = 0; i < count; i++) {
-      const fn = pick(rnd, firstNames);
-      const ln = pick(rnd, lastNames);
-      const grade = pu === "PL01NC01" ? pick(rnd, ["D1", "C2", "C1"]) : pick(rnd, ["A5", "B1", "B1", "B2", "B2", "C1", "C1", "C2", "NG"]);
-      const jobFn = pu === "PL01NC10" ? "EEC" : grade === "Z" ? "Z" : "CSS";
-      const loc = pick(rnd, locations).code;
-      const tenureYears = Math.floor(rnd() * 8);
-      const start = new Date(Date.UTC(2020 + Math.floor(rnd() * 5) - tenureYears, Math.floor(rnd() * 12), 1 + Math.floor(rnd() * 28)));
-      const localNumber = `P${String(n++).padStart(7, "0")}`;
-      const skills = Array.from({ length: 3 + Math.floor(rnd() * 3) }, () => pick(rnd, skillsPool)).filter((v, idx, a) => a.indexOf(v) === idx);
-      out.push({
-        localNumber,
-        ggid: `GGID${n}`,
-        firstName: fn,
-        lastName: ln,
-        displayName: `${fn} ${ln}`,
-        puCode: pu,
-        gradeCode: grade,
-        jobFunction: jobFn as Employee["jobFunction"],
-        locationCode: loc,
-        startDate: start.toISOString().slice(0, 10),
-        fteCapacity: 1.0,
-        engagement: `${productionUnits.find((p) => p.code === pu)?.displayName ?? pu}`,
-        skills,
-      });
-    }
-  }
-  return out;
-}
-
-export const employees = generateEmployees();
 
 // ---------- employee month snapshots ----------
 
@@ -366,127 +309,35 @@ export function generateContractOfMandate(): ContractOfMandate[] {
 export const contractOfMandate = generateContractOfMandate();
 
 // ---------- projects & GFS hours ----------
+// Projects and assignments sourced from ForecastProjectsCCACoreApps_2026.xlsx.
+// Vacation hours synthesized from ADMIN vacation phasing since the source workbook
+// does not include time-off data.
 
-const projectNames: [string, string, string][] = [
-  ["101121141", "ABB — Platform Modernization", "ABB"],
-  ["101121142", "BMW — Connected Drive", "BMW"],
-  ["101121143", "VW Cloud Foundation", "Volkswagen"],
-  ["101121144", "Audi — SDV Pilot", "Audi"],
-  ["101121145", "Daimler — Finance Integration", "Mercedes-Benz"],
-  ["101121146", "UBS — Core Banking", "UBS"],
-  ["101121147", "ING — Open Banking API", "ING"],
-  ["101121148", "Allianz — Claims Modernization", "Allianz"],
-  ["101121149", "Vodafone — 5G OSS", "Vodafone"],
-  ["101121150", "Deutsche Telekom — BSS", "DT"],
-  ["101121151", "PGE — Smart Grid", "PGE"],
-  ["101121152", "Orlen — Refinery Data Platform", "Orlen"],
-  ["101121153", "Carrefour — Loyalty Platform", "Carrefour"],
-  ["101121154", "Inditex — Supply Chain", "Inditex"],
-  ["101121155", "EU Gov — Cloud Migration", "EU"],
-  ["101121156", "Internal — Engineering Platform", "Internal"],
-  ["101121157", "Siemens — MES 4.0", "Siemens"],
-  ["101121158", "Bosch — IoT Gateway", "Bosch"],
-  ["101121159", "E.ON — Customer Platform", "E.ON"],
-  ["101121160", "Raiffeisen — Payments", "Raiffeisen"],
-];
-const projectMus = ["AUTO", "AUTO", "VW_GROUP", "VW_GROUP", "AUTO", "BANKING", "BANKING", "BANKING", "TELCO", "TELCO", "ENERGY", "ENERGY", "RETAIL", "RETAIL", "PUBLIC", "INTERNAL", "MHT", "MHT", "ENERGY", "BANKING"];
+export const projects: Project[] = realProjects;
 
-export const projects: Project[] = projectNames.map(([num, name, customer], idx) => ({
-  projectNumber: num,
-  name,
-  customer,
-  marketUnit: projectMus[idx],
-  isBillable: customer !== "Internal",
-  status: "active",
-  startDate: "2025-01-01",
-  endDate: "2027-12-31",
-  tags: [],
-}));
-
-// Project-MU affinity → bias employees from management PU (NC01) toward INTERNAL,
-// EEC (NC10) toward MHT/AUTO, etc. Keeps assignments visually coherent.
-const puProjectAffinity: Record<string, string[]> = {
-  PL01NC01: ["INTERNAL"],
-  PL01NC08: ["AUTO", "VW_GROUP", "BANKING"],
-  PL01NC09: ["BANKING", "PUBLIC", "MHT"],
-  PL01NC03: ["AUTO", "VW_GROUP", "TELCO"],
-  PL01NC04: ["BANKING", "TELCO", "AUTO"],
-  PL01NC05: ["ENERGY", "RETAIL", "BANKING"],
-  PL01NC06: ["VW_GROUP", "AUTO", "MHT"],
-  PL01NC07: ["RETAIL", "ENERGY", "PUBLIC"],
-  PL01NC10: ["MHT", "AUTO", "INTERNAL"],
-};
-
-function pickProjectFor(puCode: string, rnd: () => number, exclude: Set<string>): Project {
-  const mus = puProjectAffinity[puCode] ?? [];
-  const candidates = projects.filter((p) => mus.includes(p.marketUnit) && !exclude.has(p.projectNumber));
-  if (candidates.length > 0) return pick(rnd, candidates);
-  // fallback: any project not already picked
-  const fallback = projects.filter((p) => !exclude.has(p.projectNumber));
-  return pick(rnd, fallback.length ? fallback : projects);
-}
-
-export function generateGfsHours(): GfsHours[] {
-  const rnd = seededRandom("cca-gfs-v2");
-  const out: GfsHours[] = [];
-  // Stable primary/secondary assignment per employee. Future months apply minor churn.
-  const base = new Map<string, string[]>();
-  for (const e of employees) {
-    const exclude = new Set<string>();
-    const nProj = 1 + Math.floor(rnd() * 2);
-    const picked: string[] = [];
-    for (let i = 0; i < nProj; i++) {
-      const proj = pickProjectFor(e.puCode, rnd, exclude);
-      picked.push(proj.projectNumber);
-      exclude.add(proj.projectNumber);
-    }
-    base.set(e.localNumber, picked);
+export const gfsHours: GfsHours[] = (() => {
+  const out: GfsHours[] = [...realGfsHours];
+  // Augment real billable/non-billable hours with synthesized vacation phasing so
+  // bFTE / ARVE math continues to reconcile.
+  const employeePeriods = new Set<string>();
+  for (const g of realGfsHours) {
+    employeePeriods.add(`${g.employeeLocalNumber}::${g.period}`);
   }
-
-  for (const e of employees) {
-    const empStart = e.startDate.slice(0, 7);
-    let assigned = [...(base.get(e.localNumber) ?? [])];
-    for (const p of rollingPeriods) {
-      if (p < empStart) continue;
-      // ~8% monthly churn: swap one slot for a new affinity-matched project.
-      if (rnd() < 0.08 && assigned.length > 0) {
-        const idx = Math.floor(rnd() * assigned.length);
-        const exclude = new Set<string>(assigned);
-        const proj = pickProjectFor(e.puCode, rnd, exclude);
-        assigned = [...assigned];
-        assigned[idx] = proj.projectNumber;
-      }
-      const vacShare = vacationPhasingFor(p);
-      const vacHours = Math.round(160 * vacShare);
-      let remaining = 160 - vacHours;
-      for (let i = 0; i < assigned.length; i++) {
-        const isLast = i === assigned.length - 1;
-        const hours = isLast ? Math.max(0, remaining) : Math.max(0, Math.round(remaining * (0.4 + rnd() * 0.4)));
-        remaining -= hours;
-        const proj = projects.find((pr) => pr.projectNumber === assigned[i])!;
-        out.push({
-          employeeLocalNumber: e.localNumber,
-          period: p,
-          projectNumber: proj.projectNumber,
-          projectType: proj.isBillable ? "External Services" : "Management Resource",
-          hours,
-        });
-      }
-      if (vacHours > 0) {
-        out.push({
-          employeeLocalNumber: e.localNumber,
-          period: p,
-          projectNumber: "_VACATION_",
-          projectType: "Vacation",
-          hours: vacHours,
-        });
-      }
+  for (const key of employeePeriods) {
+    const [emp, period] = key.split("::");
+    const vacHours = Math.round(160 * vacationPhasingFor(period));
+    if (vacHours > 0) {
+      out.push({
+        employeeLocalNumber: emp,
+        period,
+        projectNumber: "_VACATION_",
+        projectType: "Vacation",
+        hours: vacHours,
+      });
     }
   }
   return out;
-}
-
-export const gfsHours = generateGfsHours();
+})();
 
 // ---------- PU month aggregates ----------
 
@@ -738,7 +589,7 @@ export function generatePipeline(): PipelineOpportunity[] {
     "Audi — Over-the-Air Updates",
     "VW — Fleet Management",
   ];
-  const mus = marketUnits.filter((m) => m.code !== "INTERNAL").map((m) => m.code);
+  const mus = marketUnits.filter((m) => !["OTHER", "GDC", "IDC"].includes(m.code)).map((m) => m.code);
   for (let i = 0; i < oppNames.length; i++) {
     const mu = pick(rnd, mus);
     const startOffset = 1 + Math.floor(rnd() * 6);
@@ -763,12 +614,35 @@ export function generatePipeline(): PipelineOpportunity[] {
 export const pipeline = generatePipeline();
 
 export function generateProjectDemand(): ProjectDemandForecast[] {
-  const rnd = seededRandom("cca-pdf-v1");
+  // Aggregate real GFS hours by project × period and convert to FTE demand.
+  // For future months beyond the source data, hold the latest observed demand flat.
+  const HOURS_PER_FTE = 160;
+  const byKey = new Map<string, number>();
+  for (const g of realGfsHours) {
+    if (g.projectNumber.startsWith("_")) continue;
+    const k = `${g.projectNumber}::${g.period}`;
+    byKey.set(k, (byKey.get(k) ?? 0) + g.hours);
+  }
   const out: ProjectDemandForecast[] = [];
+  const latestByProject = new Map<string, { period: string; fte: number }>();
+  for (const [k, hours] of byKey.entries()) {
+    const [projectNumber, period] = k.split("::");
+    const fte = Math.round((hours / HOURS_PER_FTE) * 10) / 10;
+    out.push({ projectNumber, period, fteDemand: fte });
+    const latest = latestByProject.get(projectNumber);
+    if (!latest || period > latest.period) {
+      latestByProject.set(projectNumber, { period, fte });
+    }
+  }
+  // Extend forward into rolling forecast window where no data exists.
+  const seen = new Set(Array.from(byKey.keys()));
   for (const proj of projects) {
+    const latest = latestByProject.get(proj.projectNumber);
+    if (!latest) continue;
     for (const p of rollingPeriods) {
-      const fte = 2 + Math.floor(rnd() * 8);
-      out.push({ projectNumber: proj.projectNumber, period: p, fteDemand: fte });
+      if (p <= latest.period) continue;
+      if (seen.has(`${proj.projectNumber}::${p}`)) continue;
+      out.push({ projectNumber: proj.projectNumber, period: p, fteDemand: latest.fte });
     }
   }
   return out;

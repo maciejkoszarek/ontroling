@@ -5,6 +5,8 @@ import type {
   AppFilter,
   AuditEntry,
   BudgetCell,
+  Capability,
+  ClearanceLevel,
   Comment,
   ContractOfMandate,
   DQCheckResult,
@@ -38,6 +40,7 @@ export interface AppState {
   locations: Location[];
   grades: Grade[];
   projects: Project[];
+  capabilities: Capability[];
 
   // ----- facts
   employees: Employee[];
@@ -123,6 +126,16 @@ export interface AppState {
     period: Period;
   }) => void;
 
+  addProject: (p: Omit<Project, "tags"> & { tags?: string[] }) => void;
+  updateProject: (projectNumber: string, patch: Partial<Omit<Project, "projectNumber">>) => void;
+
+  addCapability: (args: { name: string; category?: string }) => void;
+  renameCapability: (id: string, name: string, category?: string) => void;
+  removeCapability: (id: string) => void;
+  setEmployeeCapabilities: (localNumber: string, capabilityIds: string[]) => void;
+  setEmployeeGermanSpeaker: (localNumber: string, v: boolean) => void;
+  setEmployeeClearanceLevel: (localNumber: string, v: ClearanceLevel) => void;
+
   openCycle: (label: string, periodOpened: Period) => void;
   closeCycle: (id: string) => void;
   /** Move cycle into `editing` — controllers and PU leads can write forecast values. */
@@ -158,6 +171,31 @@ export interface AppState {
   resetToDemo: () => void;
 }
 
+const SEED_CAPABILITIES: Capability[] = [
+  { id: "cap-java", name: "Java", category: "Backend" },
+  { id: "cap-dotnet", name: ".NET", category: "Backend" },
+  { id: "cap-nodejs", name: "Node.js", category: "Backend" },
+  { id: "cap-python", name: "Python", category: "Backend" },
+  { id: "cap-go", name: "Go", category: "Backend" },
+  { id: "cap-angular", name: "Angular", category: "Frontend" },
+  { id: "cap-react", name: "React", category: "Frontend" },
+  { id: "cap-vue", name: "Vue", category: "Frontend" },
+  { id: "cap-typescript", name: "TypeScript", category: "Frontend" },
+  { id: "cap-aws", name: "AWS", category: "Cloud" },
+  { id: "cap-azure", name: "Azure", category: "Cloud" },
+  { id: "cap-gcp", name: "GCP", category: "Cloud" },
+  { id: "cap-kubernetes", name: "Kubernetes", category: "Cloud" },
+  { id: "cap-terraform", name: "Terraform", category: "Cloud" },
+  { id: "cap-sap", name: "SAP", category: "Enterprise" },
+  { id: "cap-salesforce", name: "Salesforce", category: "Enterprise" },
+  { id: "cap-data-eng", name: "Data Engineering", category: "Data" },
+  { id: "cap-ml", name: "Machine Learning", category: "Data" },
+  { id: "cap-sql", name: "SQL", category: "Data" },
+  { id: "cap-devops", name: "DevOps", category: "Platform" },
+  { id: "cap-security", name: "Cyber Security", category: "Platform" },
+  { id: "cap-qa", name: "QA / Test Automation", category: "Quality" },
+];
+
 function buildInitialLockedSnapshots(): Record<string, ForecastCell[]> {
   const snapshots: Record<string, ForecastCell[]> = {};
   for (const cycle of demo.forecastCycles) {
@@ -175,6 +213,7 @@ function initialState(): Omit<AppState, keyof {
   setTheme: unknown;
   setDensity: unknown;
   setForecastValue: unknown;
+  setForecastValuesBulk: unknown;
   addComment: unknown;
   resolveComment: unknown;
   openCycle: unknown;
@@ -190,6 +229,14 @@ function initialState(): Omit<AppState, keyof {
   transferEmployee: unknown;
   assignEmployeeToProject: unknown;
   unassignEmployeeFromProject: unknown;
+  addProject: unknown;
+  updateProject: unknown;
+  addCapability: unknown;
+  renameCapability: unknown;
+  removeCapability: unknown;
+  setEmployeeCapabilities: unknown;
+  setEmployeeGermanSpeaker: unknown;
+  setEmployeeClearanceLevel: unknown;
   runDqChecks: unknown;
   waiveDqCheck: unknown;
   promoteScenario: unknown;
@@ -203,6 +250,7 @@ function initialState(): Omit<AppState, keyof {
     locations: demo.locations,
     grades: demo.grades,
     projects: demo.projects,
+    capabilities: SEED_CAPABILITIES,
 
     employees: demo.employees,
     snapshots: demo.snapshots,
@@ -514,6 +562,118 @@ export const useAppStore = create<AppState>()(
         set({ gfsHours: next, audit: [audit, ...get().audit].slice(0, 2000) });
       },
 
+      addProject: (p) => {
+        const trimmedNumber = p.projectNumber.trim();
+        if (!trimmedNumber) return;
+        if (get().projects.some((x) => x.projectNumber === trimmedNumber)) return;
+        const now = new Date().toISOString();
+        const project: Project = {
+          projectNumber: trimmedNumber,
+          name: p.name.trim(),
+          customer: p.customer.trim(),
+          marketUnit: p.marketUnit,
+          isBillable: p.isBillable,
+          status: p.status,
+          startDate: p.startDate,
+          endDate: p.endDate,
+          description: p.description?.trim() || undefined,
+          tags: p.tags ?? [],
+        };
+        const audit: AuditEntry = {
+          id: uid("au-"),
+          actor: get().user.name,
+          entityType: "project",
+          entityId: project.projectNumber,
+          action: "create",
+          after: project,
+          ts: now,
+        };
+        set({ projects: [project, ...get().projects], audit: [audit, ...get().audit].slice(0, 2000) });
+      },
+
+      updateProject: (projectNumber, patch) => {
+        const before = get().projects.find((p) => p.projectNumber === projectNumber);
+        if (!before) return;
+        const after: Project = {
+          ...before,
+          ...patch,
+          name: patch.name !== undefined ? patch.name.trim() : before.name,
+          customer: patch.customer !== undefined ? patch.customer.trim() : before.customer,
+          description:
+            patch.description !== undefined
+              ? patch.description.trim() || undefined
+              : before.description,
+        };
+        const audit: AuditEntry = {
+          id: uid("au-"),
+          actor: get().user.name,
+          entityType: "project",
+          entityId: projectNumber,
+          action: "update",
+          before,
+          after,
+          ts: new Date().toISOString(),
+        };
+        set({
+          projects: get().projects.map((p) => (p.projectNumber === projectNumber ? after : p)),
+          audit: [audit, ...get().audit].slice(0, 2000),
+        });
+      },
+
+      addCapability: ({ name, category }) => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        if (get().capabilities.some((c) => c.name.toLowerCase() === trimmed.toLowerCase())) return;
+        const cap: Capability = { id: uid("cap-"), name: trimmed, category: category?.trim() || undefined };
+        set({ capabilities: [...get().capabilities, cap] });
+      },
+
+      renameCapability: (id, name, category) => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        set({
+          capabilities: get().capabilities.map((c) =>
+            c.id === id ? { ...c, name: trimmed, category: category?.trim() || undefined } : c,
+          ),
+        });
+      },
+
+      removeCapability: (id) => {
+        const employees = get().employees.map((e) =>
+          e.capabilities?.includes(id)
+            ? { ...e, capabilities: e.capabilities.filter((cid) => cid !== id) }
+            : e,
+        );
+        set({
+          capabilities: get().capabilities.filter((c) => c.id !== id),
+          employees,
+        });
+      },
+
+      setEmployeeCapabilities: (localNumber, capabilityIds) => {
+        set({
+          employees: get().employees.map((e) =>
+            e.localNumber === localNumber ? { ...e, capabilities: [...capabilityIds] } : e,
+          ),
+        });
+      },
+
+      setEmployeeGermanSpeaker: (localNumber, v) => {
+        set({
+          employees: get().employees.map((e) =>
+            e.localNumber === localNumber ? { ...e, germanSpeaker: v } : e,
+          ),
+        });
+      },
+
+      setEmployeeClearanceLevel: (localNumber, v) => {
+        set({
+          employees: get().employees.map((e) =>
+            e.localNumber === localNumber ? { ...e, clearanceLevel: v } : e,
+          ),
+        });
+      },
+
       openCycle: (label, periodOpened) => {
         const active = get().cycles.find((c) => c.status === "open" || c.status === "editing" || c.status === "reconciling");
         const now = new Date().toISOString();
@@ -714,7 +874,7 @@ export const useAppStore = create<AppState>()(
       },
     }),
     {
-      name: "cca-practiceview-v1",
+      name: "cca-practiceview-v2",
       partialize: (s) => ({
         activeCycleId: s.activeCycleId,
         previousCycleId: s.previousCycleId,
@@ -733,6 +893,8 @@ export const useAppStore = create<AppState>()(
         leavers: s.leavers,
         transfers: s.transfers,
         gfsHours: s.gfsHours,
+        capabilities: s.capabilities,
+        projects: s.projects,
       }),
     },
   ),

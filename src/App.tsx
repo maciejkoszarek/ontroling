@@ -18,6 +18,7 @@ import Bench from "./pages/Bench";
 import Scenarios from "./pages/Scenarios";
 import Ingestion from "./pages/Ingestion";
 import Admin from "./pages/Admin";
+import Capabilities from "./pages/Capabilities";
 import DQ from "./pages/DQ";
 import ReviewPack from "./pages/ReviewPack";
 import { useAppStore } from "./store";
@@ -51,6 +52,7 @@ export default function App() {
         <Route path="review-pack" element={<ReviewPack />} />
         <Route path="ingestion" element={<Ingestion />} />
         <Route path="admin" element={<Admin />} />
+        <Route path="capabilities" element={<Capabilities />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

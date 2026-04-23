@@ -33,7 +33,7 @@ React Router 6 · ECharts 5 · SheetJS (`xlsx`) · Lucide icons.
 6. **Locked cycles are immutable**: once `status === "locked" | "archived"`,
    live writes for that cycleId are ignored; `lockedSnapshots[cycleId]` wins
    via `effectiveCells()`.
-7. **localStorage key is `cca-practiceview-v1`** — schema changes must bump
+7. **localStorage key is `cca-practiceview-v2`** — schema changes must bump
    the suffix or they corrupt user state.
 
 ## Where knowledge lives

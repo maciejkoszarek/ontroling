@@ -20,6 +20,7 @@ import {
   Moon,
   Sun,
   Sparkles,
+  Tag,
 } from "lucide-react";
 import { useAppStore } from "../store";
 import TopBar from "./TopBar";
@@ -44,6 +45,7 @@ const NAV: Array<{ section: string; items: Array<{ to: string; label: string; ic
       { to: "/arve", label: "ARVE / Utilization", icon: Activity },
       { to: "/projects", label: "Projects", icon: Briefcase },
       { to: "/people", label: "People", icon: Users },
+      { to: "/capabilities", label: "Capabilities", icon: Tag },
       { to: "/pipeline", label: "Pipeline", icon: Sparkles },
       { to: "/bench", label: "Bench & matching", icon: UserMinus },
     ],
@@ -82,7 +84,7 @@ export default function Layout() {
       <Sidebar mobileOpen={mobileOpen} />
       <div className="flex flex-col min-w-0">
         <TopBar onMenuClick={() => setMobileOpen((o) => !o)} />
-        <FilterBar />
+        {!location.pathname.startsWith("/people") && <FilterBar />}
         <main className="flex-1 overflow-auto p-4 lg:p-6">
           <Outlet />
         </main>

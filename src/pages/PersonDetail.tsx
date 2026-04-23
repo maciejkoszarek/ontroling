@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAppStore } from "../store";
-import { ArrowLeft, ArrowRightLeft, Briefcase, MapPin, Pencil, Plus, User, UserMinus, X } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, Briefcase, ChevronLeft, ChevronRight, MapPin, Pencil, Plus, User, UserMinus, X } from "lucide-react";
 import { cn, formatPct, formatNumber } from "../lib/utils";
-import { puLabel, puDisplay, rollingPeriods } from "../lib/demoData";
+import { puLabel, puDisplay, rollingPeriods, currentPeriod } from "../lib/demoData";
+import { fullFteHoursInMonth, workingDaysInMonth, HOURS_PER_WORKING_DAY } from "../lib/workingDays";
 import ReactECharts from "echarts-for-react";
 import { AddLeaverModal, AssignProjectModal, TransferModal } from "../components/forms/PeopleForms";
 
@@ -14,12 +15,14 @@ function EditableHourCell({
   unit,
   isCurrentMonth,
   isFuture,
+  fullHoursForMonth,
   onCommit,
 }: {
   hours: number;
   unit: "hours" | "fte";
   isCurrentMonth?: boolean;
   isFuture?: boolean;
+  fullHoursForMonth: number;
   onCommit: (raw: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -30,18 +33,18 @@ function EditableHourCell({
     if (editing) inputRef.current?.select();
   }, [editing]);
 
+  const fte = fullHoursForMonth > 0 ? hours / fullHoursForMonth : 0;
   const display =
     hours === 0
       ? ""
       : unit === "hours"
       ? formatNumber(hours, 0)
-      : formatNumber(hours / HOURS_PER_FTE, 2);
-  const fte = hours / HOURS_PER_FTE;
+      : formatNumber(fte, 2);
 
   function startEdit() {
     if (editing) return;
     setDraft(
-      hours === 0 ? "" : unit === "hours" ? String(hours) : (hours / HOURS_PER_FTE).toFixed(2),
+      hours === 0 ? "" : unit === "hours" ? String(hours) : fte.toFixed(2),
     );
     setEditing(true);
   }
@@ -127,6 +130,7 @@ export default function PersonDetail() {
   const transfers = useAppStore((s) => s.transfers);
   const [modal, setModal] = useState<null | "transfer" | "leaver" | "assign">(null);
   const [showUnit, setShowUnit] = useState<"hours" | "fte">("hours");
+  const [year, setYear] = useState<number>(() => Number(currentPeriod.slice(0, 4)));
 
   const employee = employees.find((e) => e.localNumber === localNumber);
 
@@ -157,13 +161,18 @@ export default function PersonDetail() {
     return s ? Math.round(s.arve * 1000) / 10 : 0;
   });
 
-  // Per-month per-project hours matrix (last 12 months visible)
-  const horizon = rollingPeriods.slice(-12);
+  // Calendar-year view: 12 months of selected year
+  const horizon = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`);
+  const horizonSet = new Set(horizon);
+  const workingDaysByPeriod = new Map(horizon.map((p) => [p, workingDaysInMonth(Number(p.slice(0, 4)), Number(p.slice(5, 7)))]));
+  const fullHoursByPeriod = new Map(horizon.map((p) => [p, fullFteHoursInMonth(p)]));
+  const yearFullHours = horizon.reduce((s, p) => s + (fullHoursByPeriod.get(p) ?? 0), 0);
+  const yearWorkingDays = yearFullHours / HOURS_PER_WORKING_DAY;
   const projectMatrix = new Map<string, Map<string, number>>();
   const projTotals = new Map<string, number>();
   for (const g of personHours) {
     projTotals.set(g.projectNumber, (projTotals.get(g.projectNumber) ?? 0) + g.hours);
-    if (!horizon.includes(g.period)) continue;
+    if (!horizonSet.has(g.period)) continue;
     let row = projectMatrix.get(g.projectNumber);
     if (!row) {
       row = new Map<string, number>();
@@ -172,7 +181,7 @@ export default function PersonDetail() {
     row.set(g.period, (row.get(g.period) ?? 0) + g.hours);
   }
 
-  const nowPeriod = horizon[0];
+  const nowPeriod = currentPeriod;
   const projectList = Array.from(projTotals.entries())
     .map(([pn, hours]) => {
       const proj = projByNumber.get(pn);
@@ -190,7 +199,8 @@ export default function PersonDetail() {
 
   function commitHours(pn: string, period: string, raw: string) {
     const n = Number(raw.replace(",", ".").replace(/[^\d.]/g, ""));
-    const hours = isNaN(n) ? 0 : showUnit === "fte" ? Math.round(n * HOURS_PER_FTE) : Math.round(n);
+    const fullHours = fullHoursByPeriod.get(period) ?? HOURS_PER_FTE;
+    const hours = isNaN(n) ? 0 : showUnit === "fte" ? Math.round(n * fullHours) : Math.round(n);
     if (hours <= 0) {
       unassign({ localNumber, projectNumber: pn, period });
       return;
@@ -319,6 +329,23 @@ export default function PersonDetail() {
           <div className="flex items-center gap-2">
             <div className="inline-flex items-center border border-border rounded-md overflow-hidden text-xs">
               <button
+                className="px-1.5 py-1 hover:bg-bg-muted"
+                onClick={() => setYear((y) => y - 1)}
+                title="Previous year"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <span className="px-2.5 py-1 font-semibold tabular-nums min-w-[48px] text-center">{year}</span>
+              <button
+                className="px-1.5 py-1 hover:bg-bg-muted"
+                onClick={() => setYear((y) => y + 1)}
+                title="Next year"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="inline-flex items-center border border-border rounded-md overflow-hidden text-xs">
+              <button
                 className={cn("px-2 py-1", showUnit === "hours" ? "bg-brand text-white" : "hover:bg-bg-muted")}
                 onClick={() => setShowUnit("hours")}
               >
@@ -341,19 +368,27 @@ export default function PersonDetail() {
             <tr>
               <th className="table-th">Project</th>
               <th className="table-th">MU</th>
-              {horizon.map((p) => (
-                <th
-                  key={p}
-                  className={cn(
-                    "table-th text-right whitespace-nowrap",
-                    p === nowPeriod && "bg-brand/10 text-brand",
-                  )}
-                  title={p}
-                >
-                  {p.slice(5, 7)}/{p.slice(2, 4)}
-                </th>
-              ))}
-              <th className="table-th text-right">Total</th>
+              {horizon.map((p) => {
+                const wd = workingDaysByPeriod.get(p) ?? 0;
+                const fh = fullHoursByPeriod.get(p) ?? 0;
+                return (
+                  <th
+                    key={p}
+                    className={cn(
+                      "table-th text-right whitespace-nowrap",
+                      p === nowPeriod && "bg-brand/10 text-brand",
+                    )}
+                    title={`${p} — ${wd} working days (${fh} h at 1.0 FTE, Polish calendar)`}
+                  >
+                    <div>{p.slice(5, 7)}/{p.slice(2, 4)}</div>
+                    <div className="text-[10px] font-normal text-fg-muted tabular-nums">{wd}d · {fh}h</div>
+                  </th>
+                );
+              })}
+              <th className="table-th text-right">
+                <div>Total {year}</div>
+                <div className="text-[10px] font-normal text-fg-muted tabular-nums">{yearWorkingDays}d · {yearFullHours}h</div>
+              </th>
               <th className="table-th"></th>
             </tr>
           </thead>
@@ -387,12 +422,15 @@ export default function PersonDetail() {
                         unit={showUnit}
                         isCurrentMonth={p === nowPeriod}
                         isFuture={p > nowPeriod}
+                        fullHoursForMonth={fullHoursByPeriod.get(p) ?? HOURS_PER_FTE}
                         onCommit={(raw) => commitHours(pr.pn, p, raw)}
                       />
                     );
                   })}
                   <td className="table-td text-right tabular-nums font-semibold">
-                    {showUnit === "hours" ? formatNumber(total, 0) : formatNumber(total / HOURS_PER_FTE, 2)}
+                    {showUnit === "hours"
+                      ? formatNumber(total, 0)
+                      : formatNumber(yearFullHours > 0 ? total / yearFullHours : 0, 2)}
                   </td>
                   <td className="table-td text-right">
                     <button
@@ -427,21 +465,32 @@ export default function PersonDetail() {
                     (s, pr) => s + (projectMatrix.get(pr.pn)?.get(p) ?? 0),
                     0,
                   );
+                  const fullHours = fullHoursByPeriod.get(p) ?? HOURS_PER_FTE;
+                  const expected = Math.round(fullHours * employee.fteCapacity);
+                  const tone =
+                    colTotal === 0
+                      ? ""
+                      : colTotal > expected
+                      ? "text-danger font-semibold"
+                      : colTotal === expected
+                      ? "text-success font-semibold"
+                      : "text-warning";
+                  const fteDisplay = fullHours > 0 ? colTotal / fullHours : 0;
                   return (
                     <td
                       key={p}
                       className={cn(
                         "table-td text-right tabular-nums",
-                        p === nowPeriod && "bg-brand/10 text-brand",
-                        colTotal / HOURS_PER_FTE >= 1 && "text-warning",
+                        p === nowPeriod && "bg-brand/10",
+                        tone,
                       )}
-                      title={`${formatNumber(colTotal, 0)} h · ${formatNumber(colTotal / HOURS_PER_FTE, 2)} FTE`}
+                      title={`${formatNumber(colTotal, 0)} h · ${formatNumber(fteDisplay, 2)} FTE — full ${employee.fteCapacity} FTE for this month = ${expected} h`}
                     >
                       {colTotal === 0
                         ? "—"
                         : showUnit === "hours"
                         ? formatNumber(colTotal, 0)
-                        : formatNumber(colTotal / HOURS_PER_FTE, 2)}
+                        : formatNumber(fteDisplay, 2)}
                     </td>
                   );
                 })}
@@ -458,7 +507,7 @@ export default function PersonDetail() {
                     );
                     return showUnit === "hours"
                       ? formatNumber(grand, 0)
-                      : formatNumber(grand / HOURS_PER_FTE, 2);
+                      : formatNumber(yearFullHours > 0 ? grand / yearFullHours : 0, 2);
                   })()}
                 </td>
                 <td className="table-td"></td>
