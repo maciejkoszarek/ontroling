@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Sparkles, X, Send } from "lucide-react";
 import { useAppStore } from "../store";
-import { ForecastIndex } from "../lib/forecast";
+import { useForecastIndex } from "../hooks/useForecastIndex";
+import type { ForecastIndex } from "../lib/forecast";
 import { leafPuCodes } from "../lib/demoData";
 import { formatNumber, periodLabel } from "../lib/utils";
 
@@ -23,14 +24,14 @@ export default function AssistantDrawer({ open, onClose }: { open: boolean; onCl
     { role: "assistant", body: "I can answer questions grounded in your live data. Try one of the examples below." },
   ]);
 
-  const state = useAppStore();
+  const { index: idx } = useForecastIndex();
 
   if (!open) return null;
 
   function onSend(text?: string) {
     const q = (text ?? input).trim();
     if (!q) return;
-    const reply = answer(q, state);
+    const reply = answer(q, useAppStore.getState(), idx);
     setMessages((m) => [...m, { role: "user", body: q }, { role: "assistant", body: reply }]);
     setInput("");
   }
@@ -95,9 +96,8 @@ export default function AssistantDrawer({ open, onClose }: { open: boolean; onCl
   );
 }
 
-function answer(q: string, s: ReturnType<typeof useAppStore.getState>): string {
+function answer(q: string, s: ReturnType<typeof useAppStore.getState>, idx: ForecastIndex): string {
   const lower = q.toLowerCase();
-  const idx = new ForecastIndex(s.forecastCells);
   const period = s.cycles.find((c) => c.id === s.activeCycleId)?.periodOpened ?? "2026-04";
 
   if (lower.includes("joiner")) {

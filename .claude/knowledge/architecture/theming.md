@@ -14,7 +14,9 @@ CSS-variable-driven light/dark, plus a density toggle. No runtime CSS-in-JS.
 - Tailwind consumes those variables via `bg-bg`, `text-fg`, `border-border`,
   `text-brand`, etc. — Tailwind theme config maps the variable names to
   utilities. See [tailwind.config.js](tailwind.config.js).
-- Theme switch toggles the `.dark` class on `document.documentElement`:
+- Theme switch toggles the `.dark` class on `document.documentElement`. The
+  effect in [src/App.tsx](src/App.tsx) owns the DOM mutation exclusively;
+  the store's `setTheme` action is a pure state setter (no side effects).
 
   ```ts
   // src/App.tsx:27-29

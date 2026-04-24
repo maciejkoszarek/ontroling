@@ -218,6 +218,8 @@ def emit_market_units():
     return '\n'.join(lines)
 
 def emit_projects():
+    # `kind` defaults to "project" here; demoData.classifyProject reclassifies
+    # names matching /opps?/i or /amb(ition)?/i when building the final list.
     lines = ['export const realProjects: Project[] = [']
     for p in ts_projects:
         lines.append(
@@ -225,6 +227,7 @@ def emit_projects():
             f"name: {ts_str(p['name'])}, "
             f"customer: {ts_str(p['customer'])}, "
             f"marketUnit: {ts_str(p['marketUnit'])}, "
+            f"kind: \"project\", "
             f"isBillable: {'true' if p['isBillable'] else 'false'}, "
             f"status: {ts_str(p['status'])}, "
             f"startDate: {ts_str(p['startDate'])}, "

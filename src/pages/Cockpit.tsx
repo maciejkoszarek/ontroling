@@ -6,12 +6,12 @@ import KpiCard from "../components/KpiCard";
 import TrendChart from "../components/TrendChart";
 import CommentFeed from "../components/CommentFeed";
 import { useAppStore } from "../store";
-import { leafPuCodes, rollingPeriods, DEMO_ANCHOR_PERIOD as currentPeriodConst, puLabel } from "../lib/demoData";
-import { ForecastIndex } from "../lib/forecast";
+import { leafPuCodes, rollingPeriods, DEMO_ANCHOR_PERIOD as demoAnchorPeriod, puLabel } from "../lib/demoData";
+import { useForecastIndex } from "../hooks/useForecastIndex";
+import { weightedMean } from "../lib/forecast";
 import { formatDelta, formatNumber, formatPct, periodLabel } from "../lib/utils";
 
 export default function Cockpit() {
-  const forecastCells = useAppStore((s) => s.forecastCells);
   const activeCycleId = useAppStore((s) => s.activeCycleId);
   const previousCycleId = useAppStore((s) => s.previousCycleId);
   const cycles = useAppStore((s) => s.cycles);
@@ -19,20 +19,18 @@ export default function Cockpit() {
   const joiners = useAppStore((s) => s.joiners);
 
   const cycle = cycles.find((c) => c.id === activeCycleId);
-  const period = cycle?.periodOpened ?? currentPeriodConst;
+  const period = cycle?.periodOpened ?? demoAnchorPeriod;
 
-  const idx = useMemo(() => new ForecastIndex(forecastCells), [forecastCells]);
+  const { index: idx } = useForecastIndex();
 
   const { hc, hcPrev, fte, ftePrev, bfte, bftePrev, arve, arvePrev, hcSeries, fteSeries, bfteSeries, arveSeries, demandSeries, leaderboard } = useMemo(() => {
     const sumAll = (metric: ForecastMetric, cycleId: string, p: string) =>
       leafPuCodes.reduce((a, pu) => a + idx.get(cycleId, pu, metric, p), 0);
-    const weightedArve = (cycleId: string, p: string) => {
-      const fts = leafPuCodes.map((pu) => idx.get(cycleId, pu, "FTE", p));
-      const arves = leafPuCodes.map((pu) => idx.get(cycleId, pu, "ARVE_PCT", p));
-      const total = fts.reduce((a, v) => a + v, 0);
-      if (total === 0) return 0;
-      return arves.reduce((a, v, i) => a + v * fts[i], 0) / total;
-    };
+    const weightedArve = (cycleId: string, p: string) =>
+      weightedMean(
+        leafPuCodes.map((pu) => idx.get(cycleId, pu, "ARVE_PCT", p)),
+        leafPuCodes.map((pu) => idx.get(cycleId, pu, "FTE", p)),
+      );
 
     const hcSeries = rollingPeriods.map((p) => sumAll("HC_END", activeCycleId, p));
     const fteSeries = rollingPeriods.map((p) => sumAll("FTE", activeCycleId, p));

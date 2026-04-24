@@ -4,7 +4,6 @@ import type {
   ForecastCycle,
   ForecastMetric,
   Period,
-  ProductionUnit,
 } from "../types";
 import { leafPuCodes, sePuCodes } from "./demoData";
 
@@ -83,6 +82,166 @@ export function rollUp(
  */
 const PCT_METRICS: ForecastMetric[] = ["ARVE_PCT", "ARVI_PCT", "BENCH_PCT", "LND_PCT", "VACATION_PCT"];
 
+/**
+ * Metrics that must be non-negative (headcount counts and FTE volumes).
+ * Counts and capacities never go below 0 in the domain model.
+ */
+const NON_NEGATIVE_METRICS: ReadonlySet<ForecastMetric> = new Set<ForecastMetric>([
+  "HC_BEGIN",
+  "HC_END",
+  "JOINERS",
+  "LEAVERS",
+  "FTE",
+  "BFTE",
+  "F1",
+  "F2",
+  "F_TOTAL",
+  "FTE_LOST",
+  "OVERTIME_FTE",
+  "UNPAID_LEAVE_FTE",
+  "VACATION_FTE",
+  "SICKNESS_FTE",
+  "FTE_CSS",
+  "ARVE_BASE",
+  "BENCH_FTE",
+  "LND_FTE",
+  "RECRUITMENT_FTE",
+  "MAN_FTE",
+  "RESERVE_FTE",
+  "BDC_SOLD_FTE",
+  "BDC_PL_FTE",
+  "INTERNAL_PROJECTS_FTE",
+  "STUDENTS_HC",
+]);
+
+export interface ValidationResult {
+  value: number;
+  clamped: boolean;
+  reason?: string;
+}
+
+/**
+ * Clamp a forecast value to its domain range. Returns the clamped value and a
+ * flag indicating whether a clamp was applied, so the caller can append a
+ * `"validation-clamp"` audit entry. Never throws.
+ *
+ * - `ARVE_PCT` clamps to [0, 1.2] (I4, overtime cap).
+ * - Other `_PCT` metrics in `PCT_METRICS` clamp to [0, 1] (I6).
+ * - Headcount / FTE volumes clamp to [0, +∞) (cannot be negative).
+ */
+export function validateForecastCell(value: number, metric: ForecastMetric): ValidationResult {
+  if (!Number.isFinite(value)) {
+    return { value: 0, clamped: true, reason: `non-finite ${metric}` };
+  }
+  if (metric === "ARVE_PCT") {
+    if (value < 0) return { value: 0, clamped: true, reason: "ARVE_PCT<0" };
+    if (value > 1.2) return { value: 1.2, clamped: true, reason: "ARVE_PCT>1.2" };
+    return { value, clamped: false };
+  }
+  if (PCT_METRICS.includes(metric)) {
+    if (value < 0) return { value: 0, clamped: true, reason: `${metric}<0` };
+    if (value > 1) return { value: 1, clamped: true, reason: `${metric}>1` };
+    return { value, clamped: false };
+  }
+  if (NON_NEGATIVE_METRICS.has(metric) && value < 0) {
+    return { value: 0, clamped: true, reason: `${metric}<0` };
+  }
+  return { value, clamped: false };
+}
+
+export interface ArithmeticViolation {
+  puCode: string;
+  period: Period;
+  metric: ForecastMetric;
+  expected: number;
+  actual: number;
+}
+
+/**
+ * Scan the provided cells for arithmetic identity drift (I1, I3, I5, I7, I8).
+ * Returns a flat list of violations to be surfaced by the DQ page. This is
+ * **reporting** — writes are never blocked on identity drift because per-component
+ * forecasting is legitimate (e.g. editing F1 without F_TOTAL should not rewrite
+ * the user's F_TOTAL override).
+ */
+export function checkArithmeticIdentities(cells: ForecastCell[]): ArithmeticViolation[] {
+  const map = new Map<string, Map<ForecastMetric, number>>();
+  for (const c of cells) {
+    if (c.grade || c.mu) continue;
+    const k = `${c.cycleId}::${c.puCode}::${c.period}`;
+    let inner = map.get(k);
+    if (!inner) {
+      inner = new Map();
+      map.set(k, inner);
+    }
+    inner.set(c.metric, c.value);
+  }
+  const out: ArithmeticViolation[] = [];
+  const EPS = 0.01;
+  for (const [k, inner] of map) {
+    const [, puCode, period] = k.split("::") as [string, string, Period];
+    const hcBeg = inner.get("HC_BEGIN");
+    const joiners = inner.get("JOINERS");
+    const leavers = inner.get("LEAVERS");
+    const hcEnd = inner.get("HC_END");
+    if (hcBeg !== undefined && joiners !== undefined && leavers !== undefined && hcEnd !== undefined) {
+      const expected = hcBeg + joiners - leavers;
+      if (Math.abs(expected - hcEnd) > EPS) {
+        out.push({ puCode, period, metric: "HC_END", expected, actual: hcEnd });
+      }
+    }
+    const f1 = inner.get("F1");
+    const f2 = inner.get("F2");
+    const fTotal = inner.get("F_TOTAL");
+    if (f1 !== undefined && f2 !== undefined && fTotal !== undefined) {
+      const expected = f1 + f2;
+      if (Math.abs(expected - fTotal) > EPS) {
+        out.push({ puCode, period, metric: "F_TOTAL", expected, actual: fTotal });
+      }
+    }
+    const fte = inner.get("FTE");
+    const bfte = inner.get("BFTE");
+    if (fte !== undefined && bfte !== undefined && bfte > fte + EPS) {
+      out.push({ puCode, period, metric: "BFTE", expected: fte, actual: bfte });
+    }
+    const ot = inner.get("OVERTIME_FTE");
+    const unpaid = inner.get("UNPAID_LEAVE_FTE");
+    const fteCss = inner.get("FTE_CSS");
+    if (fte !== undefined && ot !== undefined && unpaid !== undefined && fteCss !== undefined) {
+      const expected = fte + ot - unpaid;
+      if (Math.abs(expected - fteCss) > EPS) {
+        out.push({ puCode, period, metric: "FTE_CSS", expected, actual: fteCss });
+      }
+    }
+    const vac = inner.get("VACATION_FTE");
+    const arveBase = inner.get("ARVE_BASE");
+    if (fteCss !== undefined && vac !== undefined && unpaid !== undefined && arveBase !== undefined) {
+      const expected = fteCss - vac - unpaid;
+      if (Math.abs(expected - arveBase) > EPS) {
+        out.push({ puCode, period, metric: "ARVE_BASE", expected, actual: arveBase });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Weighted mean of `values` with `weights`. Returns 0 when the sum of weights
+ * is 0 (guards the FTE-weighted ARVE case where a PU has no FTE). Arrays must
+ * be the same length; extra elements of either are ignored.
+ */
+export function weightedMean(values: number[], weights: number[]): number {
+  const n = Math.min(values.length, weights.length);
+  let totalW = 0;
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    totalW += weights[i];
+    sum += values[i] * weights[i];
+  }
+  if (totalW === 0) return 0;
+  return sum / totalW;
+}
+
 function weightedRollup(
   cells: ForecastCell[],
   cycleId: string,
@@ -90,18 +249,13 @@ function weightedRollup(
   period: Period,
   puCodes: string[],
 ): number {
-  const nums = puCodes.map((pu) => ({
-    v: cellValue(cells, cycleId, pu, metric, period),
-    w: cellValue(cells, cycleId, pu, "FTE", period),
-  }));
-  const totalW = nums.reduce((a, x) => a + x.w, 0);
-  if (totalW === 0) return 0;
-  return nums.reduce((a, x) => a + x.v * x.w, 0) / totalW;
+  const values = puCodes.map((pu) => cellValue(cells, cycleId, pu, metric, period));
+  const weights = puCodes.map((pu) => cellValue(cells, cycleId, pu, "FTE", period));
+  return weightedMean(values, weights);
 }
 
 export function effectiveValue(
   cells: ForecastCell[],
-  allPus: ProductionUnit[],
   cycleId: string,
   puCode: string,
   metric: ForecastMetric,
@@ -225,10 +379,9 @@ export function variance(
   puCode: string,
   metric: ForecastMetric,
   period: Period,
-  allPus: ProductionUnit[],
 ): { current: number; previous: number; delta: number; deltaPct: number } {
-  const current = effectiveValue(cells, allPus, currentCycleId, puCode, metric, period);
-  const previous = effectiveValue(cells, allPus, previousCycleId, puCode, metric, period);
+  const current = effectiveValue(cells, currentCycleId, puCode, metric, period);
+  const previous = effectiveValue(cells, previousCycleId, puCode, metric, period);
   const delta = current - previous;
   const deltaPct = previous === 0 ? 0 : delta / previous;
   return { current, previous, delta, deltaPct };

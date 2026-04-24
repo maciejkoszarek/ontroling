@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ForecastCell, ForecastCycle, ForecastMetric, Period, ProductionUnit } from "../types";
-import { leafPuCodes, sePuCodes, productionUnits } from "./demoData";
+import type { ForecastCell, ForecastCycle, ForecastMetric, Period } from "../types";
+import { leafPuCodes, sePuCodes } from "./demoData";
 import {
   cellValue,
   effectiveCells,
@@ -55,16 +55,14 @@ describe("rollUp and cellValue", () => {
 });
 
 describe("effectiveValue virtual roll-ups", () => {
-  const allPus: ProductionUnit[] = productionUnits;
-
   it("CCA_SE_TOTAL sums the five SE leaves", () => {
     const cells = sePuCodes.map((pu) => makeCell(CYCLE, pu, "FTE", P, 7));
-    expect(effectiveValue(cells, allPus, CYCLE, "CCA_SE_TOTAL", "FTE", P)).toBe(35);
+    expect(effectiveValue(cells, CYCLE, "CCA_SE_TOTAL", "FTE", P)).toBe(35);
   });
 
   it("CCA_TOTAL sums every leaf PU for additive metrics", () => {
     const cells = leafPuCodes.map((pu) => makeCell(CYCLE, pu, "HC_END", P, 3));
-    expect(effectiveValue(cells, allPus, CYCLE, "CCA_TOTAL", "HC_END", P)).toBe(3 * leafPuCodes.length);
+    expect(effectiveValue(cells, CYCLE, "CCA_TOTAL", "HC_END", P)).toBe(3 * leafPuCodes.length);
   });
 
   it("CCA_TOTAL for ARVE_PCT is FTE-weighted, not a flat mean", () => {
@@ -77,17 +75,17 @@ describe("effectiveValue virtual roll-ups", () => {
       makeCell(CYCLE, small, "ARVE_PCT", P, 0.5),
     ];
     // weighted: (90*0.9 + 10*0.5) / 100 = 0.86
-    expect(effectiveValue(cells, allPus, CYCLE, "CCA_TOTAL", "ARVE_PCT", P)).toBeCloseTo(0.86, 4);
+    expect(effectiveValue(cells, CYCLE, "CCA_TOTAL", "ARVE_PCT", P)).toBeCloseTo(0.86, 4);
   });
 
   it("weighted roll-up returns 0 when total FTE weight is 0", () => {
     const cells = leafPuCodes.map((pu) => makeCell(CYCLE, pu, "ARVE_PCT", P, 0.8));
-    expect(effectiveValue(cells, allPus, CYCLE, "CCA_TOTAL", "ARVE_PCT", P)).toBe(0);
+    expect(effectiveValue(cells, CYCLE, "CCA_TOTAL", "ARVE_PCT", P)).toBe(0);
   });
 
   it("regular (non-virtual) PU delegates to cellValue", () => {
     const cells = [makeCell(CYCLE, "PL01NC08", "FTE", P, 42)];
-    expect(effectiveValue(cells, allPus, CYCLE, "PL01NC08", "FTE", P)).toBe(42);
+    expect(effectiveValue(cells, CYCLE, "PL01NC08", "FTE", P)).toBe(42);
   });
 });
 
@@ -119,13 +117,13 @@ describe("variance and mape", () => {
       makeCell(CYCLE, "PL01NC08", "FTE", P, 110),
       makeCell(PREV, "PL01NC08", "FTE", P, 100),
     ];
-    const v = variance(cells, CYCLE, PREV, "PL01NC08", "FTE", P, productionUnits);
+    const v = variance(cells, CYCLE, PREV, "PL01NC08", "FTE", P);
     expect(v.current).toBe(110);
     expect(v.previous).toBe(100);
     expect(v.delta).toBe(10);
     expect(v.deltaPct).toBeCloseTo(0.1, 6);
 
-    const vZero = variance([], CYCLE, PREV, "PL01NC08", "FTE", P, productionUnits);
+    const vZero = variance([], CYCLE, PREV, "PL01NC08", "FTE", P);
     expect(vZero.deltaPct).toBe(0);
   });
 

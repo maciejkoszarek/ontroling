@@ -58,20 +58,23 @@ describe("store — forecast edits and audit", () => {
 
   it("canEditCycle requires role controller or pu_lead and status editing", () => {
     const { activeCycleId } = useAppStore.getState();
-    expect(useAppStore.getState().canEditCycle(activeCycleId)).toBe(true);
+    const ownPu = useAppStore.getState().user.puCode ?? "PL01NC03";
+    expect(useAppStore.getState().canEditCycle(activeCycleId, ownPu)).toBe(true);
 
     useAppStore.setState({ role: "viewer" });
-    expect(useAppStore.getState().canEditCycle(activeCycleId)).toBe(false);
+    expect(useAppStore.getState().canEditCycle(activeCycleId, ownPu)).toBe(false);
 
     useAppStore.setState({ role: "pu_lead" });
-    expect(useAppStore.getState().canEditCycle(activeCycleId)).toBe(true);
+    expect(useAppStore.getState().canEditCycle(activeCycleId, ownPu)).toBe(true);
+    // pu_lead cannot edit a PU outside their scope (I25).
+    expect(useAppStore.getState().canEditCycle(activeCycleId, "PL01NC08")).toBe(false);
 
     useAppStore.setState({
       cycles: useAppStore
         .getState()
         .cycles.map((c) => (c.id === activeCycleId ? { ...c, status: "reconciling" as const } : c)),
     });
-    expect(useAppStore.getState().canEditCycle(activeCycleId)).toBe(false);
+    expect(useAppStore.getState().canEditCycle(activeCycleId, ownPu)).toBe(false);
   });
 });
 

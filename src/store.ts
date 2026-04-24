@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { persist, createJSONStorage } from "zustand/middleware";
 import type {
   Anomaly,
   AppFilter,
@@ -32,6 +32,7 @@ import type {
   WorkingCalendarEntry,
 } from "./types";
 import * as demo from "./lib/demoData";
+import { checkArithmeticIdentities, validateForecastCell } from "./lib/forecast";
 import { uid } from "./lib/utils";
 import { defaultEntryForPeriod, seedWorkingCalendar } from "./lib/workingCalendar";
 
@@ -76,7 +77,7 @@ export interface AppState {
 
   // ----- UI state
   role: Role;
-  user: { name: string; email: string };
+  user: { name: string; email: string; puCode?: string };
   filter: AppFilter;
   theme: "light" | "dark";
   density: "comfortable" | "compact";
@@ -144,8 +145,7 @@ export interface AppState {
   setEmployeeGermanSpeaker: (localNumber: string, v: boolean) => void;
   setEmployeeClearanceLevel: (localNumber: string, v: ClearanceLevel) => void;
 
-  openCycle: (label: string, periodOpened: Period) => void;
-  closeCycle: (id: string) => void;
+  openCycle: (label: string, periodOpened: Period) => boolean;
   /** Move cycle into `editing` — controllers and PU leads can write forecast values. */
   startEditing: (id: string) => void;
   /** Move cycle into `reconciling` — writes are blocked but DQ / commentary continues. */
@@ -154,8 +154,11 @@ export interface AppState {
   lockCycle: (id: string) => void;
   /** Archive a locked cycle. */
   archiveCycle: (id: string) => void;
-  /** Pure helper: is this cycle editable by the current role? */
-  canEditCycle: (id: string) => boolean;
+  /**
+   * Pure helper: is this cycle editable by the current role for this PU? PU scope
+   * is enforced for `pu_lead` — they can only write cells for their own PU.
+   */
+  canEditCycle: (id: string, puCode: string) => boolean;
 
   runDqChecks: () => void;
   waiveDqCheck: (id: string, comment: string) => void;
@@ -183,6 +186,54 @@ export interface AppState {
    * untouched. Appends a single audit entry.
    */
   applyImportPatch: (patch: Partial<AppState>, source: string) => void;
+}
+
+/**
+ * localStorage wrapper that, on QuotaExceededError, trims the persisted
+ * `audit[]` to the most recent 200 entries and retries once. Audit is the only
+ * unbounded slice — `.slice(0, 2000)` in-memory still dwarfs the 5MB quota
+ * when combined with demo forecast cells. If the retry still fails, we log
+ * and give up silently rather than crash the app.
+ */
+const AUDIT_TRIM_LIMIT = 200;
+function quotaSafeStorage(): Storage {
+  if (typeof localStorage === "undefined") {
+    return {
+      length: 0,
+      clear: () => {},
+      getItem: () => null,
+      key: () => null,
+      removeItem: () => {},
+      setItem: () => {},
+    };
+  }
+  const base = localStorage;
+  return {
+    get length() {
+      return base.length;
+    },
+    clear: () => base.clear(),
+    getItem: (k) => base.getItem(k),
+    key: (i) => base.key(i),
+    removeItem: (k) => base.removeItem(k),
+    setItem: (k, v) => {
+      try {
+        base.setItem(k, v);
+      } catch (err) {
+        console.warn("[store] localStorage quota exceeded; trimming audit log and retrying", err);
+        try {
+          const parsed = JSON.parse(v) as { state?: { audit?: unknown[] } };
+          if (parsed?.state?.audit && Array.isArray(parsed.state.audit)) {
+            parsed.state.audit = parsed.state.audit.slice(0, AUDIT_TRIM_LIMIT);
+            base.setItem(k, JSON.stringify(parsed));
+            return;
+          }
+        } catch (retryErr) {
+          console.warn("[store] trim + retry failed; persistence skipped this cycle", retryErr);
+        }
+      }
+    },
+  };
 }
 
 const SEED_CAPABILITIES: Capability[] = [
@@ -231,7 +282,6 @@ function initialState(): Omit<AppState, keyof {
   addComment: unknown;
   resolveComment: unknown;
   openCycle: unknown;
-  closeCycle: unknown;
   startEditing: unknown;
   startReconciling: unknown;
   lockCycle: unknown;
@@ -259,6 +309,7 @@ function initialState(): Omit<AppState, keyof {
   addScenario: unknown;
   ingest: unknown;
   resetToDemo: unknown;
+  applyImportPatch: unknown;
 }> {
   return {
     productionUnits: demo.productionUnits,
@@ -294,7 +345,7 @@ function initialState(): Omit<AppState, keyof {
     workingCalendar: seedWorkingCalendar(2024, 2028),
 
     role: "controller" as Role,
-    user: { name: "Maciej Koszarek", email: "maciej.koszarek@gmail.com" },
+    user: { name: "Maciej Koszarek", email: "maciej.koszarek@gmail.com", puCode: "PL01NC03" },
     filter: {},
     theme: "light" as const,
     density: "comfortable" as const,
@@ -314,14 +365,12 @@ export const useAppStore = create<AppState>()(
 
       setFilter: (f) => set((s) => ({ filter: { ...s.filter, ...f } })),
       setRole: (r) => set({ role: r }),
-      setTheme: (t) => {
-        set({ theme: t });
-        if (typeof document !== "undefined") document.documentElement.classList.toggle("dark", t === "dark");
-      },
+      setTheme: (t) => set({ theme: t }),
       setDensity: (d) => set({ density: d }),
 
       setForecastValue: ({ cycleId, puCode, period, metric, value, comment }) => {
-        if (!get().canEditCycle(cycleId)) return;
+        if (!get().canEditCycle(cycleId, puCode)) return;
+        const check = validateForecastCell(value, metric);
         const idx = get().forecastCells.findIndex(
           (c) => c.cycleId === cycleId && c.puCode === puCode && c.period === period && c.metric === metric,
         );
@@ -332,7 +381,7 @@ export const useAppStore = create<AppState>()(
           puCode,
           period,
           metric,
-          value,
+          value: check.value,
           comment,
           enteredBy: get().user.name,
           enteredAt: now,
@@ -342,21 +391,35 @@ export const useAppStore = create<AppState>()(
         if (idx >= 0) newCells[idx] = updated;
         else newCells.push(updated);
 
-        const audit: AuditEntry = {
-          id: uid("au-"),
-          actor: get().user.name,
-          entityType: "forecast_cell",
-          entityId: `${cycleId}::${puCode}::${metric}::${period}`,
-          action: before ? "update" : "create",
-          before,
-          after: updated,
-          ts: now,
-        };
-        set({ forecastCells: newCells, audit: [audit, ...get().audit].slice(0, 2000) });
+        const audits: AuditEntry[] = [
+          {
+            id: uid("au-"),
+            actor: get().user.name,
+            entityType: "forecast_cell",
+            entityId: `${cycleId}::${puCode}::${metric}::${period}`,
+            action: before ? "update" : "create",
+            before,
+            after: updated,
+            ts: now,
+          },
+        ];
+        if (check.clamped) {
+          audits.push({
+            id: uid("au-"),
+            actor: get().user.name,
+            entityType: "validation-clamp",
+            entityId: `${cycleId}::${puCode}::${metric}::${period}`,
+            action: "update",
+            before: { value },
+            after: { value: check.value, reason: check.reason },
+            ts: now,
+          });
+        }
+        set({ forecastCells: newCells, audit: [...audits, ...get().audit].slice(0, 2000) });
       },
 
       setForecastValuesBulk: ({ cycleId, puCode, values, source = "auto_baseline" }) => {
-        if (!get().canEditCycle(cycleId)) return;
+        if (!get().canEditCycle(cycleId, puCode)) return;
         const now = new Date().toISOString();
         const actor = get().user.name;
         const cells = [...get().forecastCells];
@@ -371,6 +434,7 @@ export const useAppStore = create<AppState>()(
         }
         const audits: AuditEntry[] = [];
         for (const { period, metric, value } of values) {
+          const check = validateForecastCell(value, metric);
           const k = keyOf(period, metric);
           const existingIdx = idxByKey.get(k);
           const before = existingIdx !== undefined ? cells[existingIdx] : undefined;
@@ -379,7 +443,7 @@ export const useAppStore = create<AppState>()(
             puCode,
             period,
             metric,
-            value,
+            value: check.value,
             enteredBy: actor,
             enteredAt: now,
             source,
@@ -399,6 +463,18 @@ export const useAppStore = create<AppState>()(
             after: updated,
             ts: now,
           });
+          if (check.clamped) {
+            audits.push({
+              id: uid("au-"),
+              actor,
+              entityType: "validation-clamp",
+              entityId: `${cycleId}::${puCode}::${metric}::${period}`,
+              action: "update",
+              before: { value },
+              after: { value: check.value, reason: check.reason },
+              ts: now,
+            });
+          }
         }
         set({ forecastCells: cells, audit: [...audits, ...get().audit].slice(0, 2000) });
       },
@@ -740,35 +816,56 @@ export const useAppStore = create<AppState>()(
       },
 
       openCycle: (label, periodOpened) => {
+        if (get().role !== "controller") return false;
         const active = get().cycles.find((c) => c.status === "open" || c.status === "editing" || c.status === "reconciling");
         const now = new Date().toISOString();
-        const newCycles: ForecastCycle[] = get().cycles.map((c) =>
-          c.id === active?.id
-            ? { ...c, status: "locked", lockedBy: get().user.name, lockedAt: now }
-            : c,
-        );
+        const actor = get().user.name;
+        const audits: AuditEntry[] = [];
+        let nextCycles = get().cycles;
+        let nextSnapshots = get().lockedSnapshots;
+        if (active) {
+          const snapshot = get().forecastCells.filter((c) => c.cycleId === active.id);
+          nextCycles = nextCycles.map((c) =>
+            c.id === active.id ? { ...c, status: "locked" as const, lockedBy: actor, lockedAt: now } : c,
+          );
+          nextSnapshots = { ...nextSnapshots, [active.id]: snapshot };
+          audits.push({
+            id: uid("au-"),
+            actor,
+            entityType: "cycle",
+            entityId: active.id,
+            action: "lock" as const,
+            before: { status: active.status, cells: snapshot.length },
+            after: { status: "locked", cells: snapshot.length },
+            ts: now,
+          });
+        }
         const newCycle: ForecastCycle = {
           id: `fc-${periodOpened}`,
           label,
           periodOpened,
           status: "open",
-          openedBy: get().user.name,
+          openedBy: actor,
           openedAt: now,
           prevCycleId: active?.id,
         };
+        audits.push({
+          id: uid("au-"),
+          actor,
+          entityType: "cycle",
+          entityId: newCycle.id,
+          action: "open" as const,
+          after: { status: "open", label, periodOpened },
+          ts: now,
+        });
         set({
-          cycles: [newCycle, ...newCycles],
+          cycles: [newCycle, ...nextCycles],
+          lockedSnapshots: nextSnapshots,
           activeCycleId: newCycle.id,
           previousCycleId: active?.id ?? get().previousCycleId,
+          audit: [...audits, ...get().audit].slice(0, 2000),
         });
-      },
-
-      closeCycle: (id) => {
-        set({
-          cycles: get().cycles.map((c) =>
-            c.id === id ? { ...c, status: "locked" as const, lockedBy: get().user.name, lockedAt: new Date().toISOString() } : c,
-          ),
-        });
+        return true;
       },
 
       startEditing: (id) => {
@@ -872,12 +969,14 @@ export const useAppStore = create<AppState>()(
         });
       },
 
-      canEditCycle: (id) => {
+      canEditCycle: (id, puCode) => {
         const cycle = get().cycles.find((c) => c.id === id);
         if (!cycle) return false;
         if (cycle.status !== "editing") return false;
         const role = get().role;
-        return role === "controller" || role === "pu_lead";
+        if (role === "controller") return true;
+        if (role === "pu_lead") return get().user.puCode === puCode;
+        return false;
       },
 
       runDqChecks: () => {
@@ -890,10 +989,22 @@ export const useAppStore = create<AppState>()(
           if (seen.has(k)) duplicates.push({ employee: s.employeeLocalNumber, period: s.period });
           seen.add(k);
         }
+        const violations = checkArithmeticIdentities(get().forecastCells);
+        const existingIds = new Set(get().dqChecks.map((c) => c.id));
+        const identityCheck: DQCheckResult = {
+          id: "dq-arithmetic",
+          name: "Arithmetic identities",
+          description: "HC_END, F_TOTAL, FTE_CSS, ARVE_BASE match their component sums; BFTE ≤ FTE.",
+          severity: "warning",
+          status: violations.length === 0 ? "pass" : "fail",
+          failingRows: violations.slice(0, 50),
+        };
         const withUpdated = get().dqChecks.map((c) => {
           if (c.id === "dq-4") return { ...c, status: duplicates.length === 0 ? ("pass" as const) : ("fail" as const), failingRows: duplicates };
+          if (c.id === "dq-arithmetic") return identityCheck;
           return c;
         });
+        if (!existingIds.has("dq-arithmetic")) withUpdated.push(identityCheck);
         set({ dqChecks: withUpdated });
       },
 
@@ -939,6 +1050,7 @@ export const useAppStore = create<AppState>()(
       },
 
       applyImportPatch: (patch, source) => {
+        if (get().role !== "controller") return;
         const safeKeys: ReadonlyArray<keyof AppState> = [
           "productionUnits",
           "marketUnits",
@@ -981,12 +1093,13 @@ export const useAppStore = create<AppState>()(
           after: { tables: Object.keys(applied), source },
           ts: new Date().toISOString(),
         };
-        set({ ...(applied as Partial<AppState>), audit: [...state.audit, entry] });
+        set({ ...(applied as Partial<AppState>), audit: [entry, ...state.audit].slice(0, 2000) });
       },
     }),
     {
       name: "cca-practiceview-v2",
       version: 2,
+      storage: createJSONStorage(() => quotaSafeStorage()),
       migrate: (persisted, version) => {
         if (!persisted || typeof persisted !== "object") return persisted as AppState;
         const s = persisted as Record<string, unknown>;
@@ -1038,6 +1151,3 @@ export const useAppStore = create<AppState>()(
   ),
 );
 
-export function puByCode(s: AppState, code: string): ProductionUnit | undefined {
-  return s.productionUnits.find((p) => p.code === code);
-}

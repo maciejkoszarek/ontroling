@@ -9,7 +9,6 @@ export default function Ingestion() {
   const ingest = useAppStore((s) => s.ingest);
   const lastIngest = useAppStore((s) => s.lastIngest);
   const resetDemo = useAppStore((s) => s.resetToDemo);
-  const state = useAppStore();
   const [parsing, setParsing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -32,6 +31,7 @@ export default function Ingestion() {
   }
 
   function onExport() {
+    const state = useAppStore.getState();
     const blob = exportWorkbook({
       employees: state.employees,
       snapshots: state.snapshots,

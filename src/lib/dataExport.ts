@@ -34,7 +34,7 @@ function flattenArrayField<T>(arr: T[] | undefined): string {
   return arr.map(String).join("|");
 }
 
-function normalize<T extends Row>(rows: readonly T[]): Row[] {
+function normalize<T extends object>(rows: readonly T[]): Row[] {
   return rows.map((r) => {
     const out: Row = {};
     for (const [k, v] of Object.entries(r)) {
@@ -59,7 +59,7 @@ function flattenLockedSnapshots(
   const rows: Row[] = [];
   for (const [cycleId, cells] of Object.entries(locked)) {
     for (const cell of cells) {
-      rows.push({ cycleId, ...cell });
+      rows.push({ ...cell, cycleId });
     }
   }
   return rows;

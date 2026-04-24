@@ -502,33 +502,57 @@ const gradeMix: Array<{ grade: string; share: number; arve: number }> = [
 export function generateForecastCells(): ForecastCell[] {
   const rnd = seededRandom("cca-forecast-v1");
   const out: ForecastCell[] = [];
-  const metrics: ForecastMetric[] = [
-    "HC_BEGIN", "HC_END", "JOINERS", "LEAVERS",
-    "FTE", "BFTE", "F1", "F2", "F_TOTAL", "ARVE_PCT",
+  // Primary metrics: seeded independently.
+  const primaryMetrics: ForecastMetric[] = [
+    "HC_BEGIN", "JOINERS", "LEAVERS",
+    "FTE", "F1", "F2", "ARVE_PCT",
     "FTE_LOST", "OVERTIME_FTE", "UNPAID_LEAVE_FTE", "VACATION_FTE", "SICKNESS_FTE",
-    "FTE_CSS", "ARVE_BASE",
     "BENCH_FTE", "LND_FTE", "RECRUITMENT_FTE", "MAN_FTE", "RESERVE_FTE",
     "BDC_SOLD_FTE", "BDC_PL_FTE", "INTERNAL_PROJECTS_FTE",
     "STUDENTS_HC",
     "BENCH_PCT", "LND_PCT", "VACATION_PCT", "ARVI_PCT",
   ];
+  // Derived metrics: computed from primary ones so arithmetic identities hold at seed time.
+  const derivedMetrics: ForecastMetric[] = [
+    "HC_END",      // I1: HC_BEGIN + JOINERS − LEAVERS
+    "F_TOTAL",     // I3: F1 + F2
+    "FTE_CSS",     // I7: FTE + OVERTIME_FTE − UNPAID_LEAVE_FTE
+    "ARVE_BASE",   // I8: FTE_CSS − VACATION_FTE − UNPAID_LEAVE_FTE
+    "BFTE",        // I5: BFTE ≤ FTE
+  ];
   const gradeMetrics: ForecastMetric[] = ["HC_END", "FTE", "BFTE", "ARVE_PCT"];
+  const round2 = (v: number) => Math.round(v * 100) / 100;
   for (const cycle of forecastCycles) {
     for (const pu of leafPuCodes) {
       for (const p of rollingPeriods) {
         const ageMonths = periodToIndex(DEMO_ANCHOR_PERIOD) - periodToIndex(cycle.periodOpened);
         const noise = 1 + ageMonths * 0.01 * (rnd() - 0.5);
         const aggregates: Partial<Record<ForecastMetric, number>> = {};
-        for (const metric of metrics) {
+        for (const metric of primaryMetrics) {
           const v = baselineForecastValue(pu, p, metric, rnd);
-          const value = Math.round(v * noise * 100) / 100;
+          const value = round2(v * noise);
           aggregates[metric] = value;
+        }
+        const hcBeg = aggregates.HC_BEGIN ?? 0;
+        const joiners = aggregates.JOINERS ?? 0;
+        const leavers = aggregates.LEAVERS ?? 0;
+        aggregates.HC_END = round2(hcBeg + joiners - leavers);
+        aggregates.F_TOTAL = round2((aggregates.F1 ?? 0) + (aggregates.F2 ?? 0));
+        const fte = aggregates.FTE ?? 0;
+        const ot = aggregates.OVERTIME_FTE ?? 0;
+        const unpaid = aggregates.UNPAID_LEAVE_FTE ?? 0;
+        const vac = aggregates.VACATION_FTE ?? 0;
+        aggregates.FTE_CSS = round2(fte + ot - unpaid);
+        aggregates.ARVE_BASE = round2((aggregates.FTE_CSS ?? 0) - vac - unpaid);
+        const bfteRaw = baselineForecastValue(pu, p, "BFTE", rnd) * noise;
+        aggregates.BFTE = round2(Math.min(bfteRaw, fte));
+        for (const metric of [...primaryMetrics, ...derivedMetrics]) {
           out.push({
             cycleId: cycle.id,
             puCode: pu,
             period: p,
             metric,
-            value,
+            value: aggregates[metric] ?? 0,
             source: "seed",
             enteredBy: "system",
             enteredAt: "2026-04-01T00:00:00Z",
@@ -541,14 +565,14 @@ export function generateForecastCells(): ForecastCell[] {
             const value =
               metric === "ARVE_PCT"
                 ? Math.max(0.45, Math.min(1.05, g.arve * jitter))
-                : Math.round(agg * g.share * jitter * 100) / 100;
+                : round2(agg * g.share * jitter);
             out.push({
               cycleId: cycle.id,
               puCode: pu,
               period: p,
               metric,
               grade: g.grade,
-              value: Math.round(value * 100) / 100,
+              value: round2(value),
               source: "seed",
               enteredBy: "system",
               enteredAt: "2026-04-01T00:00:00Z",

@@ -1,17 +1,16 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useAppStore } from "../store";
 import { leafPuCodes, rollingPeriods, DEMO_ANCHOR_PERIOD, puLabel } from "../lib/demoData";
-import { ForecastIndex } from "../lib/forecast";
+import { useForecastIndex } from "../hooks/useForecastIndex";
 import { formatPct, periodLabel } from "../lib/utils";
 import ReactECharts from "echarts-for-react";
 
 export default function Arve() {
-  const forecastCells = useAppStore((s) => s.forecastCells);
   const activeCycleId = useAppStore((s) => s.activeCycleId);
   const [rolling, setRolling] = useState(false);
   const [selected, setSelected] = useState<{ pu: string; period: string } | null>(null);
 
-  const idx = useMemo(() => new ForecastIndex(forecastCells), [forecastCells]);
+  const { index: idx } = useForecastIndex();
 
   function arveAt(pu: string, period: string): number {
     if (!rolling) return idx.get(activeCycleId, pu, "ARVE_PCT", period);

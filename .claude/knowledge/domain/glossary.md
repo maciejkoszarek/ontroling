@@ -35,7 +35,7 @@ before the ARVI ratio (row 107 of the source workbook).
 
 **ARVI_PCT** — ARVE *improvement* ratio; an alternative utilization view.
 
-## Forecast metrics (28 total)
+## Forecast metrics (30 total)
 
 See [metrics.md](metrics.md) for the full list with formulas. Key ones:
 
@@ -45,7 +45,7 @@ See [metrics.md](metrics.md) for the full list with formulas. Key ones:
 - `HC_BEGIN`, `HC_END`, `JOINERS`, `LEAVERS` — as above.
 - `FTE`, `BFTE`, `ARVE_PCT`.
 - IDC overlays: `FTE_LOST`, `OVERTIME_FTE`, `UNPAID_LEAVE_FTE`,
-  `VACATION_FTE`, `SICKNESS_FTE`.
+  `VACATION_FTE`, `SICKNESS_FTE`, `FTE_CSS`, `ARVE_BASE`.
 - IDC bucket breakdown: `BENCH_FTE`, `LND_FTE`, `RECRUITMENT_FTE`, `MAN_FTE`,
   `RESERVE_FTE`, `BDC_SOLD_FTE`, `BDC_PL_FTE`, `INTERNAL_PROJECTS_FTE`.
 - Ratios (0..1): `BENCH_PCT`, `LND_PCT`, `VACATION_PCT`, `ARVI_PCT`.

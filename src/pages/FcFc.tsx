@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Download } from "lucide-react";
 import { useAppStore } from "../store";
 import { leafPuCodes, rollingPeriods, DEMO_ANCHOR_PERIOD, puLabel } from "../lib/demoData";
-import { ForecastIndex, attributeVariance, effectiveCells } from "../lib/forecast";
+import { attributeVariance } from "../lib/forecast";
+import { useForecastIndex } from "../hooks/useForecastIndex";
 import Heatmap from "../components/Heatmap";
 import { formatDelta, formatNumber, periodLabel } from "../lib/utils";
 import type { ForecastMetric } from "../types";
@@ -21,18 +22,12 @@ export default function FcFc() {
   const cycles = useAppStore((s) => s.cycles);
   const activeCycleId = useAppStore((s) => s.activeCycleId);
   const previousCycleId = useAppStore((s) => s.previousCycleId);
-  const forecastCells = useAppStore((s) => s.forecastCells);
-  const lockedSnapshots = useAppStore((s) => s.lockedSnapshots);
   const [metric, setMetric] = useState<ForecastMetric>("FTE");
   const [current, setCurrent] = useState(activeCycleId);
   const [previous, setPrevious] = useState(previousCycleId);
   const [selected, setSelected] = useState<{ pu: string; period: string; delta: number } | null>(null);
 
-  const merged = useMemo(
-    () => effectiveCells(forecastCells, lockedSnapshots, cycles),
-    [forecastCells, lockedSnapshots, cycles],
-  );
-  const idx = useMemo(() => new ForecastIndex(merged), [merged]);
+  const { index: idx } = useForecastIndex();
 
   const currentCycle = cycles.find((c) => c.id === current);
   const previousCycle = cycles.find((c) => c.id === previous);

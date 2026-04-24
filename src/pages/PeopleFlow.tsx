@@ -191,20 +191,23 @@ export default function PeopleFlow() {
                       </td>
                     </tr>
                   )}
-                  {(selectedItems as Array<Joiner | Leaver>).map((item) => (
-                    <tr key={item.id} className="hover:bg-bg-hover">
-                      <td className="table-td">
-                        <div className="font-medium">
-                          {item.firstName} {item.lastName}
-                        </div>
-                        <div className="text-[11px] text-fg-muted">{item.employeeLocalNumber ?? "—"}</div>
-                      </td>
-                      <td className="table-td">{puLabel(item.puCode)}</td>
-                      <td className="table-td">{item.gradeCode}</td>
-                      <td className="table-td">{tab === "joiners" ? item.startDate : item.endDate}</td>
-                      <td className="table-td capitalize">{tab === "joiners" ? item.source : item.reason.replace("_", " ")}</td>
-                    </tr>
-                  ))}
+                  {(selectedItems as Array<Joiner | Leaver>).map((item) => {
+                    const isLeaver = "endDate" in item;
+                    return (
+                      <tr key={item.id} className="hover:bg-bg-hover">
+                        <td className="table-td">
+                          <div className="font-medium">
+                            {item.firstName} {item.lastName}
+                          </div>
+                          <div className="text-[11px] text-fg-muted">{item.employeeLocalNumber ?? "—"}</div>
+                        </td>
+                        <td className="table-td">{puLabel(item.puCode)}</td>
+                        <td className="table-td">{item.gradeCode}</td>
+                        <td className="table-td">{isLeaver ? item.endDate : item.startDate}</td>
+                        <td className="table-td capitalize">{isLeaver ? item.reason.replace("_", " ") : item.source}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}

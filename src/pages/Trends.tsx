@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import TrendChart from "../components/TrendChart";
 import { useAppStore } from "../store";
 import { leafPuCodes, rollingPeriods, DEMO_ANCHOR_PERIOD, puLabel } from "../lib/demoData";
-import { ForecastIndex } from "../lib/forecast";
+import { useForecastIndex } from "../hooks/useForecastIndex";
 import KpiCard from "../components/KpiCard";
 import type { ForecastMetric } from "../types";
 
@@ -19,13 +19,12 @@ const SERIES_OPTIONS: ReadonlyArray<{
 ];
 
 export default function Trends() {
-  const forecastCells = useAppStore((s) => s.forecastCells);
   const activeCycleId = useAppStore((s) => s.activeCycleId);
   const filter = useAppStore((s) => s.filter);
   const [enabled, setEnabled] = useState<string[]>(["HC_END", "FTE", "BFTE"]);
   const [puFilter, setPuFilter] = useState<string>(filter.pu ?? "CCA_TOTAL");
 
-  const idx = useMemo(() => new ForecastIndex(forecastCells), [forecastCells]);
+  const { index: idx } = useForecastIndex();
 
   function valueFor(metric: ForecastMetric, p: string) {
     if (puFilter === "CCA_TOTAL") {

@@ -3,11 +3,11 @@ title: Forecast Metrics Catalogue
 owner: domain-analyst
 ---
 
-# Forecast metrics (28)
+# Forecast metrics (30)
 
 Every `ForecastCell` carries a `metric` from the union below. The axes are
 `(cycleId, puCode, period, metric)` plus optional `grade` and `mu`. Full type
-in [src/types.ts:87-121](src/types.ts).
+in [src/types.ts:108-142](src/types.ts).
 
 ## Headcount & flow (5)
 

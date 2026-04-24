@@ -64,7 +64,7 @@ React Router 6 · ECharts 5 · SheetJS (`xlsx`) · Lucide icons.
 
 ```bash
 npm run dev          # http://localhost:5173
-npm run typecheck    # tsc --noEmit — must pass before any commit
+npm run typecheck    # tsc -p tsconfig.app.json --noEmit — must pass before any commit
 npm run lint         # eslint .
 npm run test         # vitest run
 npm run test:watch   # vitest (watch)

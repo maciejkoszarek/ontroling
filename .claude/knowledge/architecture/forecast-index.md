@@ -36,9 +36,10 @@ promote, lock).
 | --- | --- |
 | Quick value lookup | `ForecastIndex.get(...)` |
 | Need the cell metadata | `ForecastIndex.getCell(...)` |
-| Need to resolve virtual PUs | `effectiveValue(cells, allPus, ...)` |
+| Need to resolve virtual PUs | `effectiveValue(cells, cycleId, puCode, metric, period)` |
 | Sum over specific PU list | `rollUp(cells, cycleId, metric, period, puCodes)` |
-| FTE-weighted average over PUs | `weightedRollup(cells, ...)` (used internally by `effectiveValue` for `PCT_METRICS`) |
+| FTE-weighted average over PUs | `weightedRollup(cells, ...)` (module-private; used internally by `effectiveValue` for `PCT_METRICS`) |
+| Pure weighted mean from parallel arrays | `weightedMean(values, weights)` — exported for UI call sites that read via `ForecastIndex` (Cockpit, PuDetail) |
 
 ## Virtual PU roll-ups
 
@@ -68,8 +69,10 @@ guard on `canEditCycle(id)`.
 
 ## Variance
 
-- `variance(cells, curCycle, prevCycle, pu, metric, period, pus)` →
-  `{ current, previous, delta, deltaPct }`.
+- `variance(cells, curCycle, prevCycle, pu, metric, period)` →
+  `{ current, previous, delta, deltaPct }`. Resolves virtual PUs internally
+  via `effectiveValue` — no `allPus` parameter is needed; leaf-code lists
+  come from `leafPuCodes` / `sePuCodes` exported by `demoData`.
 - `attributeVariance(deltaFte)` returns the driver split
   (`joiners / leavers / movers / project_ramp / arve_drift / other`). Current
   implementation is a fixed-share heuristic — treat as placeholder for a

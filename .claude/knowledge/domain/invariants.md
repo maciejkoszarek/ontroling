@@ -11,16 +11,27 @@ parser output.
 
 ## Arithmetic
 
-| ID | Invariant | Scope |
-| --- | --- | --- |
-| I1 | `HC_END(p) = HC_BEGIN(p) + JOINERS(p) − LEAVERS(p)` | per cycle × PU × period |
-| I2 | `HC_BEGIN(p+1) = HC_END(p)` | per cycle × PU, period transition |
-| I3 | `F_TOTAL = F1 + F2` | per cell identity |
-| I4 | `0 ≤ ARVE_PCT ≤ 1.2` | per cell |
-| I5 | `BFTE ≤ FTE` | per cell |
-| I6 | All `_PCT` metrics ∈ `[0, 1]` (except `ARVE_PCT`, see I4) | per cell |
-| I7 | `FTE_CSS = FTE + OVERTIME_FTE − UNPAID_LEAVE_FTE` | per cell |
-| I8 | `ARVE_BASE = FTE_CSS − VACATION_FTE − UNPAID_LEAVE_FTE` | per cell |
+| ID | Invariant | Scope | Enforcement |
+| --- | --- | --- | --- |
+| I1 | `HC_END(p) = HC_BEGIN(p) + JOINERS(p) − LEAVERS(p)` | per cycle × PU × period | DQ-reported via `checkArithmeticIdentities` |
+| I2 | `HC_BEGIN(p+1) = HC_END(p)` | per cycle × PU, period transition | — |
+| I3 | `F_TOTAL = F1 + F2` | per cell identity | DQ-reported |
+| I4 | `0 ≤ ARVE_PCT ≤ 1.2` | per cell | **Clamped on write** (`validateForecastCell`) |
+| I5 | `BFTE ≤ FTE` | per cell | DQ-reported |
+| I6 | All `_PCT` metrics ∈ `[0, 1]` (except `ARVE_PCT`, see I4) | per cell | **Clamped on write** |
+| I7 | `FTE_CSS = FTE + OVERTIME_FTE − UNPAID_LEAVE_FTE` | per cell | DQ-reported |
+| I8 | `ARVE_BASE = FTE_CSS − VACATION_FTE − UNPAID_LEAVE_FTE` | per cell | DQ-reported |
+
+I1/I3/I5/I7/I8 are **reported, not enforced** on write: per-component
+forecasting (editing just `F1`) must not silently rewrite the user's
+`F_TOTAL`. Violations surface via the `dq-arithmetic` DQ check populated by
+`runDqChecks`. Seed data (`demoData.generateForecastCells`) derives the
+dependent metrics from their parts so the seeded dataset starts clean.
+
+I4/I6 are **clamped on write** inside `validateForecastCell` (see
+[src/lib/forecast.ts](src/lib/forecast.ts)). Out-of-range writes are coerced
+silently and an extra audit entry with `entityType: "validation-clamp"` is
+appended. Non-negative headcount/FTE volumes are clamped the same way.
 
 ## Roll-up
 
@@ -59,11 +70,16 @@ parser output.
 
 ## RBAC (see [rbac.md](rbac.md) for the matrix)
 
-| ID | Invariant |
-| --- | --- |
-| I24 | `viewer` can read all screens but mutate nothing |
-| I25 | `pu_lead` can edit forecast cells only for their PU scope |
-| I26 | `finance` and `hr` cannot edit forecast cells |
+| ID | Invariant | Enforcement |
+| --- | --- | --- |
+| I24 | `viewer` can read all screens but mutate nothing | Action-level role guards |
+| I25 | `pu_lead` can edit forecast cells only for their PU scope | **Enforced** via `puCode` argument to `canEditCycle(id, puCode)`; `pu_lead` passes only when `user.puCode === puCode` |
+| I26 | `finance` and `hr` cannot edit forecast cells | `canEditCycle` returns `false` for these roles |
+
+`canEditCycle` is the one predicate guarding `setForecastValue` /
+`setForecastValuesBulk`. Every forecast-write caller must pass the target
+`puCode` so the `pu_lead` scope check actually runs — callers that pass a
+stale or guessed PU violate I25.
 
 ## Audit
 

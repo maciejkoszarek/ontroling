@@ -1,13 +1,14 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { CheckCircle2, History, Info, Layers, PieChart, Send, Sparkles, Zap, GraduationCap, Users } from "lucide-react";
 import { useAppStore } from "../store";
-import { leafPuCodes, puByCode, rollingPeriods, DEMO_ANCHOR_PERIOD as currentPeriodConst, puLabel, sePuCodes, vacationPhasingFor } from "../lib/demoData";
+import { leafPuCodes, puByCode, rollingPeriods, DEMO_ANCHOR_PERIOD as demoAnchorPeriod, puLabel, sePuCodes, vacationPhasingFor } from "../lib/demoData";
 import MetricGrid, { type GridCellValue, type MetricRow } from "../components/MetricGrid";
 import CommentFeed from "../components/CommentFeed";
 import KpiCard from "../components/KpiCard";
 import TrendChart from "../components/TrendChart";
-import { ForecastIndex, effectiveValue } from "../lib/forecast";
+import { effectiveValue, weightedMean } from "../lib/forecast";
+import { useForecastIndex } from "../hooks/useForecastIndex";
 import { formatNumber, periodLabel } from "../lib/utils";
 import type { ForecastMetric, Period } from "../types";
 
@@ -91,7 +92,6 @@ export default function PuDetail() {
   const { code } = useParams<{ code: string }>();
   const navigate = useNavigate();
   const puList = useAppStore((s) => s.productionUnits);
-  const forecastCells = useAppStore((s) => s.forecastCells);
   const setForecastValue = useAppStore((s) => s.setForecastValue);
   const setForecastValuesBulk = useAppStore((s) => s.setForecastValuesBulk);
   const activeCycleId = useAppStore((s) => s.activeCycleId);
@@ -104,7 +104,7 @@ export default function PuDetail() {
 
   const [showActuals, setShowActuals] = useState(true);
 
-  const idx = useMemo(() => new ForecastIndex(forecastCells), [forecastCells]);
+  const { cells: forecastCells, index: idx } = useForecastIndex();
 
   if (!pu) {
     return <div className="card p-6 text-sm">PU &quot;{code}&quot; not found.</div>;
@@ -115,7 +115,7 @@ export default function PuDetail() {
   const rolledSet = new Set(rolledCodes);
 
   function primitiveValue(metric: ForecastMetric, period: Period, cycleId = activeCycleId): number {
-    return effectiveValue(forecastCells, puList, cycleId, code!, metric, period);
+    return effectiveValue(forecastCells, cycleId, code!, metric, period);
   }
 
   function transfersNetFor(period: Period): number {
@@ -133,51 +133,59 @@ export default function PuDetail() {
   function rollupValue(metric: ForecastMetric, period: Period, cycleId = activeCycleId): number {
     if (COMPUTED_KEYS.has(metric)) {
       const derived = deriveComputed(
-        (m) => effectiveValue(forecastCells, puList, cycleId, code!, m, period),
+        (m) => effectiveValue(forecastCells, cycleId, code!, m, period),
         transfersNetFor(period),
       );
       return derived[metric] ?? 0;
     }
-    return effectiveValue(forecastCells, puList, cycleId, code!, metric, period);
+    return effectiveValue(forecastCells, cycleId, code!, metric, period);
   }
 
   function rollupGradeBreakdown(metric: ForecastMetric, period: Period): Array<{ grade: string; value: number }> {
-    const out = new Map<string, number>();
-    const fteWeights = new Map<string, number>();
-    for (const pu of rolledCodes) {
-      const b = idx.gradeBreakdown(activeCycleId, pu, metric, period);
-      if (!b) continue;
-      if (metric === "ARVE_PCT") {
-        // weighted by FTE per grade
+    if (metric === "ARVE_PCT") {
+      // Per-grade FTE-weighted ARVE across the rolled PUs.
+      const values = new Map<string, number[]>();
+      const weights = new Map<string, number[]>();
+      for (const pu of rolledCodes) {
+        const b = idx.gradeBreakdown(activeCycleId, pu, metric, period);
+        if (!b) continue;
         const f = idx.gradeBreakdown(activeCycleId, pu, "FTE", period);
         for (const [g, v] of b) {
           const w = f?.get(g) ?? 1;
-          out.set(g, (out.get(g) ?? 0) + v * w);
-          fteWeights.set(g, (fteWeights.get(g) ?? 0) + w);
+          if (!values.has(g)) values.set(g, []);
+          if (!weights.has(g)) weights.set(g, []);
+          values.get(g)!.push(v);
+          weights.get(g)!.push(w);
         }
-      } else {
-        for (const [g, v] of b) out.set(g, (out.get(g) ?? 0) + v);
       }
+      const list: Array<{ grade: string; value: number }> = [];
+      for (const [g, vs] of values) {
+        list.push({ grade: g, value: weightedMean(vs, weights.get(g) ?? []) });
+      }
+      return list.sort((a, b) => a.grade.localeCompare(b.grade));
+    }
+    const out = new Map<string, number>();
+    for (const pu of rolledCodes) {
+      const b = idx.gradeBreakdown(activeCycleId, pu, metric, period);
+      if (!b) continue;
+      for (const [g, v] of b) out.set(g, (out.get(g) ?? 0) + v);
     }
     const list: Array<{ grade: string; value: number }> = [];
-    for (const [g, v] of out) {
-      const value = metric === "ARVE_PCT" ? v / (fteWeights.get(g) || 1) : v;
-      list.push({ grade: g, value });
-    }
+    for (const [g, v] of out) list.push({ grade: g, value: v });
     return list.sort((a, b) => a.grade.localeCompare(b.grade));
   }
 
-  const hcByGrade = rollupGradeBreakdown("HC_END", currentPeriodConst);
-  const arveByGrade = rollupGradeBreakdown("ARVE_PCT", currentPeriodConst);
+  const hcByGrade = rollupGradeBreakdown("HC_END", demoAnchorPeriod);
+  const arveByGrade = rollupGradeBreakdown("ARVE_PCT", demoAnchorPeriod);
   const arveByGradeMap = new Map(arveByGrade.map((r) => [r.grade, r.value]));
   const hcTotal = hcByGrade.reduce((a, b) => a + b.value, 0);
-  const studentsHc = rollupValue("STUDENTS_HC", currentPeriodConst);
+  const studentsHc = rollupValue("STUDENTS_HC", demoAnchorPeriod);
   // A5 = intern grade, NG = UZ intern — join as "students"
   const studentGrades = new Set(["A5", "NG"]);
   const studentsByGrade = hcByGrade.filter((r) => studentGrades.has(r.grade));
   const studentsHcGrade = studentsByGrade.reduce((a, b) => a + b.value, 0);
 
-  const fteNow = rollupValue("FTE", currentPeriodConst);
+  const fteNow = rollupValue("FTE", demoAnchorPeriod);
   const breakdown: Array<{ label: string; metric: ForecastMetric; tone: string; desc?: string }> = [
     { label: "Vacation", metric: "VACATION_FTE", tone: "text-sky-700", desc: "Planned annual leave" },
     { label: "Sickness", metric: "SICKNESS_FTE", tone: "text-amber-700", desc: "Driven by ADMIN phasing × 0.69" },
@@ -193,7 +201,7 @@ export default function PuDetail() {
   ];
   const breakdownValues = breakdown.map((r) => ({
     ...r,
-    value: rollupValue(r.metric, currentPeriodConst),
+    value: rollupValue(r.metric, demoAnchorPeriod),
   }));
 
   // Build values map for the grid
@@ -202,7 +210,7 @@ export default function PuDetail() {
     values[row.key] = {};
     for (const p of rollingPeriods) {
       const v = rollupValue(row.key as ForecastMetric, p);
-      values[row.key][p] = { value: v, isActual: p <= currentPeriodConst };
+      values[row.key][p] = { value: v, isActual: p <= demoAnchorPeriod };
     }
   }
 
@@ -211,10 +219,10 @@ export default function PuDetail() {
     if (isVirtual) return;
     const metrics: ForecastMetric[] = ["HC_BEGIN", "FTE", "F1", "F2"];
     for (const metric of metrics) {
-      const last = idx.get(activeCycleId, code!, metric, currentPeriodConst);
+      const last = idx.get(activeCycleId, code!, metric, demoAnchorPeriod);
       rollingPeriods.forEach((p, i) => {
-        if (p <= currentPeriodConst) return;
-        const months = i - rollingPeriods.indexOf(currentPeriodConst);
+        if (p <= demoAnchorPeriod) return;
+        const months = i - rollingPeriods.indexOf(demoAnchorPeriod);
         const v = last * (1 + months * 0.006);
         setForecastValue({ cycleId: activeCycleId, puCode: code!, period: p, metric, value: Math.round(v * 100) / 100 });
       });
@@ -233,7 +241,7 @@ export default function PuDetail() {
    */
   function forecastFromPeopleAndProjects() {
     if (isVirtual) return;
-    const base = currentPeriodConst;
+    const base = demoAnchorPeriod;
     const hcNow = rollupValue("HC_END", base);
     const fteNow = primitiveValue("FTE", base);
     const hcToFte = hcNow > 0 ? fteNow / hcNow : 1;
@@ -311,11 +319,11 @@ export default function PuDetail() {
   }
 
   // KPI
-  const cur = rollupValue("FTE", currentPeriodConst);
-  const prev = effectiveValue(forecastCells, puList, previousCycleId, code!, "FTE", currentPeriodConst);
-  const hc = rollupValue("HC_END", currentPeriodConst);
-  const bfte = rollupValue("BFTE", currentPeriodConst);
-  const arve = rollupValue("ARVE_PCT", currentPeriodConst);
+  const cur = rollupValue("FTE", demoAnchorPeriod);
+  const prev = effectiveValue(forecastCells, previousCycleId, code!, "FTE", demoAnchorPeriod);
+  const hc = rollupValue("HC_END", demoAnchorPeriod);
+  const bfte = rollupValue("BFTE", demoAnchorPeriod);
+  const arve = rollupValue("ARVE_PCT", demoAnchorPeriod);
 
   return (
     <div className="space-y-4">
@@ -389,25 +397,25 @@ export default function PuDetail() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard label="HC (end)" value={hc} fractionDigits={0} />
         <KpiCard label="FTE assigned" value={cur} delta={cur - prev} deltaLabel="vs prev FC" />
-        <KpiCard label="bFTE" value={bfte} delta={bfte - effectiveValue(forecastCells, puList, previousCycleId, code!, "BFTE", currentPeriodConst)} deltaLabel="vs prev FC" />
-        <KpiCard label="ARVE %" value={arve * 100} unit="%" delta={(arve - effectiveValue(forecastCells, puList, previousCycleId, code!, "ARVE_PCT", currentPeriodConst)) * 100} deltaLabel="vs prev FC" />
+        <KpiCard label="bFTE" value={bfte} delta={bfte - effectiveValue(forecastCells, previousCycleId, code!, "BFTE", demoAnchorPeriod)} deltaLabel="vs prev FC" />
+        <KpiCard label="ARVE %" value={arve * 100} unit="%" delta={(arve - effectiveValue(forecastCells, previousCycleId, code!, "ARVE_PCT", demoAnchorPeriod)) * 100} deltaLabel="vs prev FC" />
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <KpiCard
           label="On bench (FTE)"
-          value={rollupValue("BENCH_FTE", currentPeriodConst)}
+          value={rollupValue("BENCH_FTE", demoAnchorPeriod)}
           fractionDigits={1}
-          tone={rollupValue("BENCH_FTE", currentPeriodConst) / Math.max(1, fteNow) > 0.08 ? "danger" : "warning"}
+          tone={rollupValue("BENCH_FTE", demoAnchorPeriod) / Math.max(1, fteNow) > 0.08 ? "danger" : "warning"}
         />
         <KpiCard
           label="Vacation (FTE)"
-          value={rollupValue("VACATION_FTE", currentPeriodConst)}
+          value={rollupValue("VACATION_FTE", demoAnchorPeriod)}
           fractionDigits={1}
         />
         <KpiCard
           label="L&D (FTE)"
-          value={rollupValue("LND_FTE", currentPeriodConst)}
+          value={rollupValue("LND_FTE", demoAnchorPeriod)}
           fractionDigits={1}
         />
         <KpiCard
@@ -417,7 +425,7 @@ export default function PuDetail() {
         />
         <KpiCard
           label="ARVI %"
-          value={rollupValue("ARVI_PCT", currentPeriodConst) * 100}
+          value={rollupValue("ARVI_PCT", demoAnchorPeriod) * 100}
           unit="%"
           fractionDigits={1}
         />
@@ -441,7 +449,7 @@ export default function PuDetail() {
             rows={ROWS.filter((_) => showActuals || _.editable !== false)}
             periods={rollingPeriods}
             values={values}
-            currentPeriod={currentPeriodConst}
+            currentPeriod={demoAnchorPeriod}
             density={density}
             onCellChange={(row, period, value) =>
               setForecastValue({
@@ -464,7 +472,7 @@ export default function PuDetail() {
               <h3 className="text-sm font-semibold mb-3">FTE vs previous FC</h3>
               <TrendChart
                 periods={rollingPeriods}
-                markPeriod={currentPeriodConst}
+                markPeriod={demoAnchorPeriod}
                 series={[
                   {
                     name: "This FC",
@@ -473,7 +481,7 @@ export default function PuDetail() {
                   },
                   {
                     name: "Previous FC",
-                    data: rollingPeriods.map((p) => effectiveValue(forecastCells, puList, previousCycleId, code!, "FTE", p)),
+                    data: rollingPeriods.map((p) => effectiveValue(forecastCells, previousCycleId, code!, "FTE", p)),
                     color: "#94a3b8",
                   },
                 ]}
@@ -484,7 +492,7 @@ export default function PuDetail() {
               <h3 className="text-sm font-semibold mb-3">Joiners / Leavers (planned + actual)</h3>
               <TrendChart
                 periods={rollingPeriods}
-                markPeriod={currentPeriodConst}
+                markPeriod={demoAnchorPeriod}
                 series={[
                   { name: "Joiners", type: "bar", data: rollingPeriods.map((p) => rollupValue("JOINERS", p)), color: "#16a34a" },
                   { name: "Leavers", type: "bar", data: rollingPeriods.map((p) => -rollupValue("LEAVERS", p)), color: "#dc2626" },
@@ -511,7 +519,7 @@ export default function PuDetail() {
 
           <div className="card p-4">
             <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
-              <PieChart className="w-4 h-4 text-brand" /> Utilization breakdown · {periodLabel(currentPeriodConst, "short")}
+              <PieChart className="w-4 h-4 text-brand" /> Utilization breakdown · {periodLabel(demoAnchorPeriod, "short")}
             </h3>
             <p className="text-[11px] text-fg-muted mb-2">
               FTE split across billable (BDC), non-billable (Bench/L&D/MAN), and absence (Vacation/Sickness).
@@ -548,7 +556,7 @@ export default function PuDetail() {
 
           <div className="card p-4">
             <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
-              <GraduationCap className="w-4 h-4 text-brand" /> Students · {periodLabel(currentPeriodConst, "short")}
+              <GraduationCap className="w-4 h-4 text-brand" /> Students · {periodLabel(demoAnchorPeriod, "short")}
             </h3>
             <div className="text-2xl font-semibold">{studentsHc + studentsHcGrade}</div>
             <div className="text-[11px] text-fg-muted">
@@ -570,7 +578,7 @@ export default function PuDetail() {
           {hcByGrade.length > 0 && (
             <div className="card p-4">
               <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                <Layers className="w-4 h-4 text-brand" /> Grade mix · {periodLabel(currentPeriodConst, "short")}
+                <Layers className="w-4 h-4 text-brand" /> Grade mix · {periodLabel(demoAnchorPeriod, "short")}
               </h3>
               <table className="w-full text-xs">
                 <thead>

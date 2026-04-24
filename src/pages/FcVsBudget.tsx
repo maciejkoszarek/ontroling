@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useAppStore } from "../store";
 import { leafPuCodes, rollingPeriods, puLabel } from "../lib/demoData";
-import { ForecastIndex, indexBudget } from "../lib/forecast";
+import { indexBudget } from "../lib/forecast";
+import { useForecastIndex } from "../hooks/useForecastIndex";
 import Heatmap from "../components/Heatmap";
 import { formatDelta, formatNumber, periodLabel } from "../lib/utils";
 import type { ForecastMetric } from "../types";
@@ -14,13 +15,12 @@ const METRICS: Array<{ key: ForecastMetric; label: string }> = [
 ];
 
 export default function FcVsBudget() {
-  const forecastCells = useAppStore((s) => s.forecastCells);
   const budget = useAppStore((s) => s.budget);
   const activeCycleId = useAppStore((s) => s.activeCycleId);
   const [metric, setMetric] = useState<ForecastMetric>("FTE");
   const [year, setYear] = useState(2026);
 
-  const idx = useMemo(() => new ForecastIndex(forecastCells), [forecastCells]);
+  const { index: idx } = useForecastIndex();
   const budgetIdx = useMemo(() => indexBudget(budget), [budget]);
 
   const cols = rollingPeriods.filter((p) => p.startsWith(String(year)));
