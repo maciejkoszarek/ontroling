@@ -95,10 +95,10 @@ export default function AssistantDrawer({ open, onClose }: { open: boolean; onCl
   );
 }
 
-function answer(q: string, s: ReturnType<typeof useAppStore.getState> | any): string {
+function answer(q: string, s: ReturnType<typeof useAppStore.getState>): string {
   const lower = q.toLowerCase();
   const idx = new ForecastIndex(s.forecastCells);
-  const period = s.cycles.find((c: any) => c.id === s.activeCycleId)?.periodOpened ?? "2026-04";
+  const period = s.cycles.find((c) => c.id === s.activeCycleId)?.periodOpened ?? "2026-04";
 
   if (lower.includes("joiner")) {
     const horizon = 3;
@@ -107,7 +107,7 @@ function answer(q: string, s: ReturnType<typeof useAppStore.getState> | any): st
       const d = new Date(Date.UTC(y, m - 1 + i, 1));
       return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
     });
-    const total = s.joiners.filter((j: any) => j.status === "planned" && periods.includes(j.startDate.slice(0, 7))).length;
+    const total = s.joiners.filter((j) => j.status === "planned" && periods.includes(j.startDate.slice(0, 7))).length;
     return `There are ${total} planned joiners across CCA for the next ${horizon} months (${periods[0]} → ${periods.at(-1)}). The largest cohorts are in SE1 and SE2.`;
   }
 

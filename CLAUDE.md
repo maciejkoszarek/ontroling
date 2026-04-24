@@ -48,6 +48,7 @@ React Router 6 · ECharts 5 · SheetJS (`xlsx`) · Lucide icons.
 | Store shape, slices, persistence | [.claude/knowledge/architecture/store-shape.md](.claude/knowledge/architecture/store-shape.md) |
 | ForecastIndex internals | [.claude/knowledge/architecture/forecast-index.md](.claude/knowledge/architecture/forecast-index.md) |
 | Excel → store mapping | [.claude/knowledge/architecture/excel-parser.md](.claude/knowledge/architecture/excel-parser.md) |
+| Data backup & import (xlsx/sqlite/json) | [.claude/knowledge/architecture/data-backup.md](.claude/knowledge/architecture/data-backup.md) |
 | Route map | [.claude/knowledge/architecture/routing.md](.claude/knowledge/architecture/routing.md) |
 | Theming (CSS variables, dark/light) | [.claude/knowledge/architecture/theming.md](.claude/knowledge/architecture/theming.md) |
 | File/code naming | [.claude/knowledge/conventions/naming.md](.claude/knowledge/conventions/naming.md) |

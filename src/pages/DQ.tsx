@@ -65,7 +65,7 @@ export default function DQ() {
 
             {c.failingRows && c.failingRows.length > 0 && c.status === "fail" && (
               <div className="mt-2 space-y-1 text-xs">
-                {(c.failingRows as any[]).slice(0, 5).map((row, i) => (
+                {c.failingRows.slice(0, 5).map((row, i) => (
                   <div key={i} className="font-mono text-[11px] text-fg-muted truncate">
                     {JSON.stringify(row)}
                   </div>

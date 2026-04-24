@@ -53,7 +53,7 @@ parser output.
 
 | ID | Invariant |
 | --- | --- |
-| I21 | localStorage key is `cca-practiceview-v1` |
+| I21 | localStorage key is `cca-practiceview-v2`; `persist` uses `version: 2` with `migrate()` for forward moves |
 | I22 | Any schema change that is not forward-compatible must bump the key suffix (`v2`, `v3`, …) |
 | I23 | `resetToDemo()` fully reseeds — no stale fields remain |
 
@@ -71,3 +71,4 @@ parser output.
 | --- | --- |
 | I27 | Every forecast mutation appends exactly one `AuditEntry` with action `create` or `update` |
 | I28 | Every cycle transition appends one `AuditEntry` with the matching action |
+| I29 | Every `workingCalendar` mutation (edit or reset) appends one `AuditEntry` with `entityType: "working_calendar"` |

@@ -2,13 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAppStore } from "../store";
 import { ArrowLeft, ArrowRightLeft, Briefcase, ChevronLeft, ChevronRight, MapPin, Pencil, Plus, User, UserMinus, X } from "lucide-react";
-import { cn, formatPct, formatNumber } from "../lib/utils";
-import { puLabel, puDisplay, rollingPeriods, currentPeriod } from "../lib/demoData";
-import { fullFteHoursInMonth, workingDaysInMonth, HOURS_PER_WORKING_DAY } from "../lib/workingDays";
+import { cn, formatPct, formatNumber, activeCycleYear } from "../lib/utils";
+import { puLabel, puDisplay, rollingPeriods, DEMO_ANCHOR_PERIOD } from "../lib/demoData";
+import { HOURS_PER_WORKING_DAY } from "../lib/workingDays";
+import { buildDaysByPeriod, buildHoursByPeriod } from "../lib/workingCalendar";
 import ReactECharts from "echarts-for-react";
 import { AddLeaverModal, AssignProjectModal, TransferModal } from "../components/forms/PeopleForms";
-
-const HOURS_PER_FTE = 160;
 
 function EditableHourCell({
   hours,
@@ -128,9 +127,12 @@ export default function PersonDetail() {
   const unassign = useAppStore((s) => s.unassignEmployeeFromProject);
   const assign = useAppStore((s) => s.assignEmployeeToProject);
   const transfers = useAppStore((s) => s.transfers);
+  const workingCalendar = useAppStore((s) => s.workingCalendar);
+  const cycles = useAppStore((s) => s.cycles);
+  const activeCycleId = useAppStore((s) => s.activeCycleId);
   const [modal, setModal] = useState<null | "transfer" | "leaver" | "assign">(null);
   const [showUnit, setShowUnit] = useState<"hours" | "fte">("hours");
-  const [year, setYear] = useState<number>(() => Number(currentPeriod.slice(0, 4)));
+  const [year, setYear] = useState<number>(() => activeCycleYear(cycles, activeCycleId));
 
   const employee = employees.find((e) => e.localNumber === localNumber);
 
@@ -164,8 +166,8 @@ export default function PersonDetail() {
   // Calendar-year view: 12 months of selected year
   const horizon = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`);
   const horizonSet = new Set(horizon);
-  const workingDaysByPeriod = new Map(horizon.map((p) => [p, workingDaysInMonth(Number(p.slice(0, 4)), Number(p.slice(5, 7)))]));
-  const fullHoursByPeriod = new Map(horizon.map((p) => [p, fullFteHoursInMonth(p)]));
+  const workingDaysByPeriod = buildDaysByPeriod(workingCalendar, horizon);
+  const fullHoursByPeriod = buildHoursByPeriod(workingCalendar, horizon);
   const yearFullHours = horizon.reduce((s, p) => s + (fullHoursByPeriod.get(p) ?? 0), 0);
   const yearWorkingDays = yearFullHours / HOURS_PER_WORKING_DAY;
   const projectMatrix = new Map<string, Map<string, number>>();
@@ -181,7 +183,7 @@ export default function PersonDetail() {
     row.set(g.period, (row.get(g.period) ?? 0) + g.hours);
   }
 
-  const nowPeriod = currentPeriod;
+  const nowPeriod = DEMO_ANCHOR_PERIOD;
   const projectList = Array.from(projTotals.entries())
     .map(([pn, hours]) => {
       const proj = projByNumber.get(pn);
@@ -199,8 +201,8 @@ export default function PersonDetail() {
 
   function commitHours(pn: string, period: string, raw: string) {
     const n = Number(raw.replace(",", ".").replace(/[^\d.]/g, ""));
-    const fullHours = fullHoursByPeriod.get(period) ?? HOURS_PER_FTE;
-    const hours = isNaN(n) ? 0 : showUnit === "fte" ? Math.round(n * fullHours) : Math.round(n);
+    const fullHours = fullHoursByPeriod.get(period) ?? 160;
+    const hours = !Number.isFinite(n) ? 0 : showUnit === "fte" ? Math.round(n * fullHours) : Math.round(n);
     if (hours <= 0) {
       unassign({ localNumber, projectNumber: pn, period });
       return;
@@ -422,7 +424,7 @@ export default function PersonDetail() {
                         unit={showUnit}
                         isCurrentMonth={p === nowPeriod}
                         isFuture={p > nowPeriod}
-                        fullHoursForMonth={fullHoursByPeriod.get(p) ?? HOURS_PER_FTE}
+                        fullHoursForMonth={fullHoursByPeriod.get(p) ?? 160}
                         onCommit={(raw) => commitHours(pr.pn, p, raw)}
                       />
                     );
@@ -465,7 +467,7 @@ export default function PersonDetail() {
                     (s, pr) => s + (projectMatrix.get(pr.pn)?.get(p) ?? 0),
                     0,
                   );
-                  const fullHours = fullHoursByPeriod.get(p) ?? HOURS_PER_FTE;
+                  const fullHours = fullHoursByPeriod.get(p) ?? 160;
                   const expected = Math.round(fullHours * employee.fteCapacity);
                   const tone =
                     colTotal === 0

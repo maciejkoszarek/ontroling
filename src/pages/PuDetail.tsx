@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { CheckCircle2, History, Info, Layers, PieChart, Send, Sparkles, Zap, GraduationCap, Users } from "lucide-react";
 import { useAppStore } from "../store";
-import { leafPuCodes, puByCode, rollingPeriods, currentPeriod as currentPeriodConst, puLabel, sePuCodes, vacationPhasingFor } from "../lib/demoData";
+import { leafPuCodes, puByCode, rollingPeriods, DEMO_ANCHOR_PERIOD as currentPeriodConst, puLabel, sePuCodes, vacationPhasingFor } from "../lib/demoData";
 import MetricGrid, { type GridCellValue, type MetricRow } from "../components/MetricGrid";
 import CommentFeed from "../components/CommentFeed";
 import KpiCard from "../components/KpiCard";

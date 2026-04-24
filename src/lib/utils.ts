@@ -1,5 +1,5 @@
 import { clsx, type ClassValue } from "clsx";
-import type { Period } from "../types";
+import type { ForecastCycle, Period } from "../types";
 
 export function cn(...inputs: ClassValue[]): string {
   return clsx(inputs);
@@ -74,6 +74,16 @@ export function monthShort(period: Period): string {
 export function currentPeriod(): Period {
   const d = new Date();
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Year of the active cycle's opened period, or current UTC year as a safe fallback. */
+export function activeCycleYear(
+  cycles: ReadonlyArray<ForecastCycle>,
+  activeCycleId: string,
+): number {
+  const p = cycles.find((c) => c.id === activeCycleId)?.periodOpened;
+  const y = Number(p?.slice(0, 4));
+  return Number.isFinite(y) && y > 0 ? y : new Date().getUTCFullYear();
 }
 
 export function clamp(n: number, min: number, max: number): number {

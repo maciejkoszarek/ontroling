@@ -1,4 +1,5 @@
-import type { Employee, EmployeeMonthSnapshot, GfsHours } from "../types";
+import type { Employee, EmployeeMonthSnapshot, GfsHours, Period, WorkingCalendarEntry } from "../types";
+import { hoursForPeriod, indexWorkingCalendar } from "./workingCalendar";
 
 export interface ProjectMonthAgg {
   projectNumber: string;
@@ -9,8 +10,6 @@ export interface ProjectMonthAgg {
   people: string[];
   peopleHours: Map<string, number>;
 }
-
-const HOURS_PER_FTE = 160;
 
 export function buildArveLookup(snapshots: EmployeeMonthSnapshot[]) {
   const byKey = new Map<string, number>();
@@ -35,8 +34,10 @@ export function buildArveLookup(snapshots: EmployeeMonthSnapshot[]) {
 export function aggregateProjects(
   gfsHours: GfsHours[],
   snapshots: EmployeeMonthSnapshot[],
+  workingCalendar: ReadonlyArray<WorkingCalendarEntry> = [],
 ): Map<string, ProjectMonthAgg> {
   const arve = buildArveLookup(snapshots);
+  const calIdx = indexWorkingCalendar(workingCalendar);
   const scratch = new Map<string, ProjectMonthAgg & { arveNum: number; arveDen: number }>();
   for (const g of gfsHours) {
     if (g.projectNumber.startsWith("_")) continue;
@@ -65,11 +66,12 @@ export function aggregateProjects(
   }
   const out = new Map<string, ProjectMonthAgg>();
   for (const [k, a] of scratch.entries()) {
+    const fullHours = hoursForPeriod(calIdx, a.period);
     out.set(k, {
       projectNumber: a.projectNumber,
       period: a.period,
       totalHours: a.totalHours,
-      fte: a.totalHours / HOURS_PER_FTE,
+      fte: fullHours > 0 ? a.totalHours / fullHours : 0,
       arve: a.arveDen > 0 ? a.arveNum / a.arveDen : 0,
       people: Array.from(a.peopleHours.keys()),
       peopleHours: a.peopleHours,
@@ -129,8 +131,8 @@ export function trailingArve(employeeLocalNumber: string, endPeriod: string, sna
   return rows.reduce((a, b) => a + b.arve, 0) / rows.length;
 }
 
-export function year2026Periods(): string[] {
-  return ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10", "2026-11", "2026-12"];
+export function yearPeriods(year: number): Period[] {
+  return Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`);
 }
 
 export function employeeMap(employees: Employee[]): Map<string, Employee> {

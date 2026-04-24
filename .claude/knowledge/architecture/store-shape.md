@@ -50,6 +50,12 @@ duplicate selectors without cutting re-renders.
 
 `comments`, `audit` (append-only), `anomalies`, `dqChecks`.
 
+### Configuration
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `workingCalendar` | `WorkingCalendarEntry[]` | per-period working days + hours; single source of truth for FTE↔hours conversions app-wide. Seeded via `seedWorkingCalendar(2024, 2028)` using Polish holiday algorithm from [src/lib/workingDays.ts](src/lib/workingDays.ts). Edited in Admin → Working calendar card. Fallback chain in [src/lib/workingCalendar.ts](src/lib/workingCalendar.ts): indexed Map → array find → algorithmic default. |
+
 ### UI state
 
 `role`, `user`, `filter`, `theme`, `density`, `lastIngest`.
@@ -60,6 +66,8 @@ Grouped in [src/store.ts:80-159](src/store.ts). Categories:
 
 - **Preferences**: `setRole`, `setTheme`, `setDensity`, `setFilter`,
   `setActiveCycle`.
+- **Working calendar**: `setWorkingCalendarEntry(period, patch)`,
+  `resetWorkingCalendar(fromYear?, toYear?)`.
 - **Forecast writes**: `setForecastValue` (single cell), `setForecastValuesBulk`.
 - **People-flow**: `addEmployee`, `addJoiner`, `addLeaver`, `transferEmployee`,
   `assignEmployeeToProject`, `unassignEmployeeFromProject`.
@@ -68,13 +76,23 @@ Grouped in [src/store.ts:80-159](src/store.ts). Categories:
 - **DQ**: `runDqChecks`, `waiveDqCheck`.
 - **Scenarios**: `addScenario`, `promoteScenario`.
 - **Ingestion**: `ingest` (replaces facts, keeps preferences).
+- **Backup & restore**: `applyImportPatch(patch, source)` — whitelist-guarded
+  bulk replace used by the Admin → Data & backup panel. Only replaces data
+  slices explicitly listed in the whitelist (reference data + forecast cells +
+  working calendar + audit). Never touches preferences (`role`, `theme`,
+  `user`, `filter`). Appends a single audit entry with
+  `entityType: "import"`, `action: "update"`, `after: { tables, source }`.
+  Callers: [src/components/AdminDataBackup.tsx](src/components/AdminDataBackup.tsx)
+  after a dry-run validated via [src/lib/dataImport.ts](src/lib/dataImport.ts).
 - **Reset**: `resetToDemo` (full reseed).
 
 ## Persistence
 
-`persist` middleware. Storage name: **`cca-practiceview-v1`**. Schema-change
+`persist` middleware. Storage name: **`cca-practiceview-v2`**. Schema-change
 rule: if a new field is not forward-compatible (or renames an existing one),
-bump the suffix (`v2`). Otherwise reloads on stale clients corrupt.
+bump the suffix. Additive fields (e.g. `workingCalendar`) are safe without a
+bump — Zustand shallow-merges on rehydrate and uses the initial seed for
+missing fields.
 
 `partialize` in [src/store.ts:719-737](src/store.ts) lists which fields are
 persisted. Reference data (PUs, MUs, grades, etc.) is **not** persisted — it

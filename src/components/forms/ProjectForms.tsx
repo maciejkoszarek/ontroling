@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAppStore } from "../../store";
-import type { Project } from "../../types";
+import type { Project, ProjectKind } from "../../types";
 import Modal, { FieldRow } from "../Modal";
 
 type CommonProps = { open: boolean; onClose: () => void };
@@ -11,6 +11,12 @@ const STATUS_OPTIONS: Array<{ value: ProjectStatus; label: string }> = [
   { value: "active", label: "Active" },
   { value: "completed", label: "Completed" },
   { value: "unknown", label: "Unknown" },
+];
+
+const KIND_OPTIONS: Array<{ value: ProjectKind; label: string; hint: string }> = [
+  { value: "project", label: "Project", hint: "Confirmed engagement" },
+  { value: "opportunity", label: "Opportunity", hint: "Sales pipeline, not yet signed" },
+  { value: "ambition", label: "Ambition", hint: "Aspirational / target account" },
 ];
 
 function nextProjectNumber(existing: ReadonlyArray<Project>): string {
@@ -37,6 +43,7 @@ export function ProjectFormModal({
   const [name, setName] = useState("");
   const [customer, setCustomer] = useState("");
   const [marketUnit, setMarketUnit] = useState("");
+  const [kind, setKind] = useState<ProjectKind>("project");
   const [isBillable, setIsBillable] = useState(true);
   const [status, setStatus] = useState<ProjectStatus>("active");
   const [startDate, setStartDate] = useState<string>("");
@@ -50,6 +57,7 @@ export function ProjectFormModal({
       setName(editing.name);
       setCustomer(editing.customer);
       setMarketUnit(editing.marketUnit);
+      setKind(editing.kind);
       setIsBillable(editing.isBillable);
       setStatus(editing.status);
       setStartDate(editing.startDate ?? "");
@@ -60,6 +68,7 @@ export function ProjectFormModal({
       setName("");
       setCustomer("");
       setMarketUnit(mus[0]?.code ?? "");
+      setKind("project");
       setIsBillable(true);
       setStatus("active");
       setStartDate("");
@@ -85,6 +94,7 @@ export function ProjectFormModal({
         name,
         customer,
         marketUnit,
+        kind,
         isBillable,
         status,
         startDate: startDate || undefined,
@@ -97,6 +107,7 @@ export function ProjectFormModal({
         name,
         customer,
         marketUnit,
+        kind,
         isBillable,
         status,
         startDate: startDate || undefined,
@@ -153,6 +164,22 @@ export function ProjectFormModal({
             ))}
           </select>
         </FieldRow>
+        <div className="col-span-2">
+          <FieldRow label="Kind" required hint={KIND_OPTIONS.find((o) => o.value === kind)?.hint}>
+            <div className="flex items-center gap-1">
+              {KIND_OPTIONS.map((o) => (
+                <button
+                  type="button"
+                  key={o.value}
+                  className={kind === o.value ? "pill-brand" : "chip"}
+                  onClick={() => setKind(o.value)}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </FieldRow>
+        </div>
         <FieldRow label="Status" required>
           <select
             className="input"

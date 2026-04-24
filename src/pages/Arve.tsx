@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useAppStore } from "../store";
-import { leafPuCodes, rollingPeriods, currentPeriod, puLabel } from "../lib/demoData";
+import { leafPuCodes, rollingPeriods, DEMO_ANCHOR_PERIOD, puLabel } from "../lib/demoData";
 import { ForecastIndex } from "../lib/forecast";
 import { formatPct, periodLabel } from "../lib/utils";
 import ReactECharts from "echarts-for-react";
@@ -30,7 +30,7 @@ export default function Arve() {
   }
 
   // histogram for currently selected month
-  const histPeriod = selected?.period ?? currentPeriod;
+  const histPeriod = selected?.period ?? DEMO_ANCHOR_PERIOD;
   const histBuckets = [
     { label: "< 65%", min: 0, max: 0.65, color: "#ef4444" },
     { label: "65–80%", min: 0.65, max: 0.80, color: "#f59e0b" },

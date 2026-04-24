@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Download } from "lucide-react";
 import { useAppStore } from "../store";
-import { leafPuCodes, rollingPeriods, currentPeriod, puLabel } from "../lib/demoData";
+import { leafPuCodes, rollingPeriods, DEMO_ANCHOR_PERIOD, puLabel } from "../lib/demoData";
 import { ForecastIndex, attributeVariance, effectiveCells } from "../lib/forecast";
 import Heatmap from "../components/Heatmap";
 import { formatDelta, formatNumber, periodLabel } from "../lib/utils";
@@ -38,7 +38,7 @@ export default function FcFc() {
   const previousCycle = cycles.find((c) => c.id === previous);
 
   // 18-month horizon for the matrix
-  const cols = rollingPeriods.slice(rollingPeriods.indexOf(currentPeriod) - 3, rollingPeriods.indexOf(currentPeriod) + 12);
+  const cols = rollingPeriods.slice(rollingPeriods.indexOf(DEMO_ANCHOR_PERIOD) - 3, rollingPeriods.indexOf(DEMO_ANCHOR_PERIOD) + 12);
 
   const cells = leafPuCodes.flatMap((pu) =>
     cols.map((p) => {

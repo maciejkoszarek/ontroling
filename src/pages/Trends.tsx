@@ -1,17 +1,22 @@
 import { useMemo, useState } from "react";
 import TrendChart from "../components/TrendChart";
 import { useAppStore } from "../store";
-import { leafPuCodes, rollingPeriods, currentPeriod, puLabel } from "../lib/demoData";
+import { leafPuCodes, rollingPeriods, DEMO_ANCHOR_PERIOD, puLabel } from "../lib/demoData";
 import { ForecastIndex } from "../lib/forecast";
 import KpiCard from "../components/KpiCard";
+import type { ForecastMetric } from "../types";
 
-const SERIES_OPTIONS = [
+const SERIES_OPTIONS: ReadonlyArray<{
+  key: ForecastMetric;
+  label: string;
+  color: string;
+}> = [
   { key: "HC_END", label: "HC end", color: "#2563eb" },
   { key: "FTE", label: "FTE", color: "#1d4ed8" },
   { key: "BFTE", label: "bFTE", color: "#16a34a" },
   { key: "JOINERS", label: "Joiners", color: "#22c55e" },
   { key: "LEAVERS", label: "Leavers", color: "#ef4444" },
-] as const;
+];
 
 export default function Trends() {
   const forecastCells = useAppStore((s) => s.forecastCells);
@@ -22,11 +27,11 @@ export default function Trends() {
 
   const idx = useMemo(() => new ForecastIndex(forecastCells), [forecastCells]);
 
-  function valueFor(metric: string, p: string) {
+  function valueFor(metric: ForecastMetric, p: string) {
     if (puFilter === "CCA_TOTAL") {
-      return leafPuCodes.reduce((a, pu) => a + idx.get(activeCycleId, pu, metric as any, p), 0);
+      return leafPuCodes.reduce((a, pu) => a + idx.get(activeCycleId, pu, metric, p), 0);
     }
-    return idx.get(activeCycleId, puFilter, metric as any, p);
+    return idx.get(activeCycleId, puFilter, metric, p);
   }
 
   const series = SERIES_OPTIONS.filter((o) => enabled.includes(o.key)).map((o) => ({
@@ -36,9 +41,9 @@ export default function Trends() {
     type: ((o.key === "JOINERS" || o.key === "LEAVERS") ? "bar" : "line") as "line" | "bar",
   }));
 
-  const totalHc = valueFor("HC_END", currentPeriod);
-  const totalFte = valueFor("FTE", currentPeriod);
-  const totalBfte = valueFor("BFTE", currentPeriod);
+  const totalHc = valueFor("HC_END", DEMO_ANCHOR_PERIOD);
+  const totalFte = valueFor("FTE", DEMO_ANCHOR_PERIOD);
+  const totalBfte = valueFor("BFTE", DEMO_ANCHOR_PERIOD);
 
   return (
     <div className="space-y-4">
@@ -81,7 +86,7 @@ export default function Trends() {
             ))}
           </div>
         </div>
-        <TrendChart periods={rollingPeriods} series={series} markPeriod={currentPeriod} height={420} />
+        <TrendChart periods={rollingPeriods} series={series} markPeriod={DEMO_ANCHOR_PERIOD} height={420} />
       </div>
     </div>
   );

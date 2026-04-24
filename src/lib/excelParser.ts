@@ -44,7 +44,7 @@ function asPeriod(v: unknown): Period | null {
   const m2 = /^(\d{1,2})[./-](\d{4})$/.exec(s);
   if (m2) return `${m2[2]}-${m2[1].padStart(2, "0")}`;
   const d = new Date(s);
-  if (!isNaN(d.getTime())) {
+  if (Number.isFinite(d.getTime())) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   }
   return null;
@@ -59,7 +59,7 @@ function asDate(v: unknown): string | null {
   }
   const s = String(v).trim();
   const d = new Date(s);
-  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  if (Number.isFinite(d.getTime())) return d.toISOString().slice(0, 10);
   return null;
 }
 
@@ -70,7 +70,7 @@ function str(v: unknown): string {
 function num(v: unknown): number {
   if (v === null || v === undefined || v === "") return 0;
   const n = Number(v);
-  return isNaN(n) ? 0 : n;
+  return Number.isFinite(n) ? n : 0;
 }
 
 function pickSheet(wb: XLSX.WorkBook, candidates: string[]): { name: string; rows: Record<string, unknown>[] } | null {

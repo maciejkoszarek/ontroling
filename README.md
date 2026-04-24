@@ -82,6 +82,6 @@ Export back to Excel with **Export current data to .xlsx** on the same page.
 
 ## Notes
 
-- Everything persists to `localStorage` under key `cca-practiceview-v1`. Clear it to force a re-seed.
+- Everything persists to `localStorage` under key `cca-practiceview-v2`. Clear it to force a re-seed.
 - The preview PDF/PPTX button on the Review pack page is a stub — it alerts with the selected config rather than generating a file.
 - The AI assistant drawer is rule-based (deterministic pattern matching over the live store), not an LLM call.

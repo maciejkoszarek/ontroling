@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { ArrowRightLeft, UserMinus, UserPlus } from "lucide-react";
 import { useAppStore } from "../store";
-import { rollingPeriods, currentPeriod, puLabel } from "../lib/demoData";
+import { rollingPeriods, DEMO_ANCHOR_PERIOD, puLabel } from "../lib/demoData";
 import KpiCard from "../components/KpiCard";
 import TrendChart from "../components/TrendChart";
 import { periodAdd, periodLabel } from "../lib/utils";
 import { AddJoinerModal, AddLeaverModal, TransferModal } from "../components/forms/PeopleForms";
+import type { Joiner, Leaver, Transfer } from "../types";
 
 export default function PeopleFlow() {
   const joiners = useAppStore((s) => s.joiners);
@@ -14,7 +15,7 @@ export default function PeopleFlow() {
   const transfers = useAppStore((s) => s.transfers);
   const filter = useAppStore((s) => s.filter);
   const [tab, setTab] = useState<"joiners" | "leavers" | "transfers">("joiners");
-  const [selectedPeriod, setSelectedPeriod] = useState<string>(currentPeriod);
+  const [selectedPeriod, setSelectedPeriod] = useState<string>(DEMO_ANCHOR_PERIOD);
   const [modal, setModal] = useState<null | "joiner" | "leaver" | "transfer">(null);
 
   const transfersByPeriod = useMemo(() => {
@@ -50,7 +51,7 @@ export default function PeopleFlow() {
   }, [leavers, filter.pu]);
 
   // Rolling 12m attrition %
-  const last12 = rollingPeriods.filter((p) => p > periodAdd(currentPeriod, -12) && p <= currentPeriod);
+  const last12 = rollingPeriods.filter((p) => p > periodAdd(DEMO_ANCHOR_PERIOD, -12) && p <= DEMO_ANCHOR_PERIOD);
   const lastYearLeavers = last12.reduce((a, p) => a + (leaversByPeriod[p]?.length ?? 0), 0);
   const attritionPct = employees.length === 0 ? 0 : lastYearLeavers / employees.length;
 
@@ -113,7 +114,7 @@ export default function PeopleFlow() {
         <h3 className="text-sm font-semibold mb-2">Monthly {tab} count</h3>
         <TrendChart
           periods={rollingPeriods}
-          markPeriod={currentPeriod}
+          markPeriod={DEMO_ANCHOR_PERIOD}
           series={[
             tab === "joiners"
               ? { name: "Joiners", type: "bar", data: joinerSeries, color: "#16a34a" }
@@ -151,7 +152,7 @@ export default function PeopleFlow() {
                       </td>
                     </tr>
                   )}
-                  {selectedItems.map((item: any) => {
+                  {(selectedItems as Transfer[]).map((item) => {
                     const emp = empByLocal.get(item.employeeLocalNumber);
                     return (
                       <tr key={item.id} className="hover:bg-bg-hover">
@@ -190,7 +191,7 @@ export default function PeopleFlow() {
                       </td>
                     </tr>
                   )}
-                  {selectedItems.map((item: any) => (
+                  {(selectedItems as Array<Joiner | Leaver>).map((item) => (
                     <tr key={item.id} className="hover:bg-bg-hover">
                       <td className="table-td">
                         <div className="font-medium">

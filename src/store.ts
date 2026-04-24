@@ -29,9 +29,11 @@ import type {
   Role,
   Scenario,
   Transfer,
+  WorkingCalendarEntry,
 } from "./types";
 import * as demo from "./lib/demoData";
 import { uid } from "./lib/utils";
+import { defaultEntryForPeriod, seedWorkingCalendar } from "./lib/workingCalendar";
 
 export interface AppState {
   // ----- reference
@@ -68,6 +70,9 @@ export interface AppState {
   audit: AuditEntry[];
   anomalies: Anomaly[];
   dqChecks: DQCheckResult[];
+
+  // ----- configuration
+  workingCalendar: WorkingCalendarEntry[];
 
   // ----- UI state
   role: Role;
@@ -129,6 +134,9 @@ export interface AppState {
   addProject: (p: Omit<Project, "tags"> & { tags?: string[] }) => void;
   updateProject: (projectNumber: string, patch: Partial<Omit<Project, "projectNumber">>) => void;
 
+  setWorkingCalendarEntry: (period: Period, patch: Partial<Omit<WorkingCalendarEntry, "period">>) => void;
+  resetWorkingCalendar: (fromYear?: number, toYear?: number) => void;
+
   addCapability: (args: { name: string; category?: string }) => void;
   renameCapability: (id: string, name: string, category?: string) => void;
   removeCapability: (id: string) => void;
@@ -169,6 +177,12 @@ export interface AppState {
   }) => void;
 
   resetToDemo: () => void;
+  /**
+   * Applies an import patch (subset of AppState slices) after the user
+   * confirmed a dry-run. Only the provided slices are replaced; the rest is
+   * untouched. Appends a single audit entry.
+   */
+  applyImportPatch: (patch: Partial<AppState>, source: string) => void;
 }
 
 const SEED_CAPABILITIES: Capability[] = [
@@ -231,6 +245,8 @@ function initialState(): Omit<AppState, keyof {
   unassignEmployeeFromProject: unknown;
   addProject: unknown;
   updateProject: unknown;
+  setWorkingCalendarEntry: unknown;
+  resetWorkingCalendar: unknown;
   addCapability: unknown;
   renameCapability: unknown;
   removeCapability: unknown;
@@ -274,6 +290,8 @@ function initialState(): Omit<AppState, keyof {
     audit: [],
     anomalies: demo.anomalies,
     dqChecks: demo.dqChecks,
+
+    workingCalendar: seedWorkingCalendar(2024, 2028),
 
     role: "controller" as Role,
     user: { name: "Maciej Koszarek", email: "maciej.koszarek@gmail.com" },
@@ -572,6 +590,7 @@ export const useAppStore = create<AppState>()(
           name: p.name.trim(),
           customer: p.customer.trim(),
           marketUnit: p.marketUnit,
+          kind: p.kind ?? "project",
           isBillable: p.isBillable,
           status: p.status,
           startDate: p.startDate,
@@ -618,6 +637,52 @@ export const useAppStore = create<AppState>()(
           projects: get().projects.map((p) => (p.projectNumber === projectNumber ? after : p)),
           audit: [audit, ...get().audit].slice(0, 2000),
         });
+      },
+
+      setWorkingCalendarEntry: (period, patch) => {
+        const entries = get().workingCalendar;
+        const idx = entries.findIndex((e) => e.period === period);
+        const before = idx >= 0 ? entries[idx] : undefined;
+        const base = before ?? defaultEntryForPeriod(period);
+        const next: WorkingCalendarEntry = {
+          period,
+          workingDays: Math.max(0, patch.workingDays !== undefined ? patch.workingDays : base.workingDays),
+          workingHours: Math.max(0, patch.workingHours !== undefined ? patch.workingHours : base.workingHours),
+        };
+        if (before && before.workingDays === next.workingDays && before.workingHours === next.workingHours) {
+          return;
+        }
+        const out = [...entries];
+        if (idx >= 0) out[idx] = next;
+        else out.push(next);
+        out.sort((a, b) => a.period.localeCompare(b.period));
+        const audit: AuditEntry = {
+          id: uid("au-"),
+          actor: get().user.name,
+          entityType: "working_calendar",
+          entityId: period,
+          action: before ? "update" : "create",
+          before,
+          after: next,
+          ts: new Date().toISOString(),
+        };
+        set({ workingCalendar: out, audit: [audit, ...get().audit].slice(0, 2000) });
+      },
+
+      resetWorkingCalendar: (fromYear = 2024, toYear = 2028) => {
+        const before = get().workingCalendar;
+        const after = seedWorkingCalendar(fromYear, toYear);
+        const audit: AuditEntry = {
+          id: uid("au-"),
+          actor: get().user.name,
+          entityType: "working_calendar",
+          entityId: `reset:${fromYear}-${toYear}`,
+          action: "update",
+          before: { count: before.length },
+          after: { count: after.length, fromYear, toYear },
+          ts: new Date().toISOString(),
+        };
+        set({ workingCalendar: after, audit: [audit, ...get().audit].slice(0, 2000) });
       },
 
       addCapability: ({ name, category }) => {
@@ -872,9 +937,81 @@ export const useAppStore = create<AppState>()(
         const s = initialState();
         set({ ...s });
       },
+
+      applyImportPatch: (patch, source) => {
+        const safeKeys: ReadonlyArray<keyof AppState> = [
+          "productionUnits",
+          "marketUnits",
+          "locations",
+          "grades",
+          "capabilities",
+          "projects",
+          "employees",
+          "workingCalendar",
+          "snapshots",
+          "gfsHours",
+          "joiners",
+          "leavers",
+          "contractOfMandate",
+          "transfers",
+          "cycles",
+          "forecastCells",
+          "budget",
+          "pipeline",
+          "projectDemand",
+          "scenarios",
+          "comments",
+          "anomalies",
+          "dqChecks",
+        ];
+        const applied: Partial<AppState> = {};
+        for (const k of safeKeys) {
+          if (patch[k] !== undefined) {
+            (applied as Record<string, unknown>)[k as string] = patch[k] as unknown;
+          }
+        }
+        if (Object.keys(applied).length === 0) return;
+        const state = get();
+        const entry: AuditEntry = {
+          id: uid("audit-"),
+          actor: state.user.email || state.user.name || "import",
+          entityType: "import",
+          entityId: source,
+          action: "update",
+          after: { tables: Object.keys(applied), source },
+          ts: new Date().toISOString(),
+        };
+        set({ ...(applied as Partial<AppState>), audit: [...state.audit, entry] });
+      },
     }),
     {
       name: "cca-practiceview-v2",
+      version: 2,
+      migrate: (persisted, version) => {
+        if (!persisted || typeof persisted !== "object") return persisted as AppState;
+        const s = persisted as Record<string, unknown>;
+        if (version < 2) {
+          if (!Array.isArray(s.workingCalendar) || (s.workingCalendar as unknown[]).length === 0) {
+            s.workingCalendar = seedWorkingCalendar(2024, 2028);
+          }
+          if (Array.isArray(s.projects)) {
+            s.projects = (s.projects as Record<string, unknown>[]).map((p) => ({
+              ...p,
+              kind: (p.kind as string | undefined) ?? "project",
+            }));
+          }
+        }
+        return s as unknown as AppState;
+      },
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        if (!Array.isArray(state.workingCalendar) || state.workingCalendar.length === 0) {
+          state.workingCalendar = seedWorkingCalendar(2024, 2028);
+        }
+        if (Array.isArray(state.projects)) {
+          state.projects = state.projects.map((p) => ({ ...p, kind: p.kind ?? "project" }));
+        }
+      },
       partialize: (s) => ({
         activeCycleId: s.activeCycleId,
         previousCycleId: s.previousCycleId,
@@ -895,6 +1032,7 @@ export const useAppStore = create<AppState>()(
         gfsHours: s.gfsHours,
         capabilities: s.capabilities,
         projects: s.projects,
+        workingCalendar: s.workingCalendar,
       }),
     },
   ),

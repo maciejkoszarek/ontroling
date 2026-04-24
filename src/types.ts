@@ -23,6 +23,12 @@ export interface MarketUnit {
   sbu: string;
 }
 
+export interface WorkingCalendarEntry {
+  period: Period;
+  workingDays: number;
+  workingHours: number;
+}
+
 export interface Location {
   code: string;
   displayName: string;
@@ -38,11 +44,14 @@ export interface Grade {
 
 export type JobFunction = "CSS" | "EEC" | "Z";
 
+export type ProjectKind = "project" | "opportunity" | "ambition";
+
 export interface Project {
   projectNumber: string;
   name: string;
   customer: string;
   marketUnit: string;
+  kind: ProjectKind;
   isBillable: boolean;
   status: "active" | "completed" | "unknown";
   startDate?: string;

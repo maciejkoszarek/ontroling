@@ -188,7 +188,7 @@ function EditableCell({
 
   function commit() {
     const n = Number(draft.replace(/[^\d.-]/g, ""));
-    if (!isNaN(n) && onChange) onChange(format === "pct" ? n / 100 : n);
+    if (Number.isFinite(n) && onChange) onChange(format === "pct" ? n / 100 : n);
     setEditing(false);
   }
 

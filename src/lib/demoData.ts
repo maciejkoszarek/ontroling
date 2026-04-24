@@ -75,16 +75,19 @@ export const startPeriod = "2024-01";
 export const endPeriod = "2027-12";
 export const allPeriods = periodRange(startPeriod, endPeriod);
 
-export const currentPeriod = "2026-03"; // matches "FC April 2026 → current cycle view" in usecase.md
-export const nextPeriod = periodAdd(currentPeriod, 1); // "2026-04"
+// DEMO_ANCHOR_PERIOD is the "as of" point for the seeded demo dataset — snapshots exist
+// up to and including this period, forecasts cover the 12 months after it. It is NOT
+// "today". For "today" use `DEMO_ANCHOR_PERIOD()` from `./utils`.
+export const DEMO_ANCHOR_PERIOD = "2026-03";
+export const DEMO_NEXT_PERIOD = periodAdd(DEMO_ANCHOR_PERIOD, 1); // "2026-04"
 
-// rolling 24 months around the current period (12 months of actuals + 12 months forecast)
-export const rollingFrom = periodAdd(currentPeriod, -11);
-export const rollingTo = periodAdd(currentPeriod, 12);
+// rolling 24 months around the demo anchor (12 months of actuals + 12 months forecast)
+export const rollingFrom = periodAdd(DEMO_ANCHOR_PERIOD, -11);
+export const rollingTo = periodAdd(DEMO_ANCHOR_PERIOD, 12);
 export const rollingPeriods = periodRange(rollingFrom, rollingTo);
 
 export function isActualPeriod(p: string): boolean {
-  return p <= currentPeriod;
+  return p <= DEMO_ANCHOR_PERIOD;
 }
 
 // ---------- vacation phasing (from ADMIN sheet) ----------
@@ -184,7 +187,7 @@ export function generateSnapshots(emps: Employee[]): EmployeeMonthSnapshot[] {
     const empStart = e.startDate.slice(0, 7);
     for (const p of rollingPeriods) {
       if (p < empStart) continue;
-      if (p > currentPeriod) continue; // snapshots only for actuals
+      if (p > DEMO_ANCHOR_PERIOD) continue; // snapshots only for actuals
       const arve = 0.55 + rnd() * 0.45; // 0.55 .. 1.0
       const bfte = Math.max(0, Math.min(1, arve)) * 0.95;
       out.push({
@@ -218,7 +221,7 @@ export function generateJoiners(emps: Employee[]): Joiner[] {
   // actual joiners from employee start dates in rolling period
   for (const e of emps) {
     const period = e.startDate.slice(0, 7);
-    if (period >= rollingFrom && period <= currentPeriod) {
+    if (period >= rollingFrom && period <= DEMO_ANCHOR_PERIOD) {
       out.push({
         id: uid("j-"),
         employeeLocalNumber: e.localNumber,
@@ -239,7 +242,7 @@ export function generateJoiners(emps: Employee[]): Joiner[] {
     const base = (hcPerPu[pu] ?? 0) * 0.04;
     for (let m = 1; m <= 6; m++) {
       const count = Math.max(0, Math.round(base + rnd() * 2 - 0.5));
-      const period = periodAdd(currentPeriod, m);
+      const period = periodAdd(DEMO_ANCHOR_PERIOD, m);
       for (let i = 0; i < count; i++) {
         out.push({
           id: uid("j-"),
@@ -269,7 +272,7 @@ export function generateLeavers(emps: Employee[]): Leaver[] {
   for (let i = 0; i < count; i++) {
     const e = emps[Math.floor(rnd() * emps.length)];
     const monthsAgo = Math.floor(rnd() * 14);
-    const endDate = periodAdd(currentPeriod, -monthsAgo) + "-15";
+    const endDate = periodAdd(DEMO_ANCHOR_PERIOD, -monthsAgo) + "-15";
     out.push({
       id: uid("l-"),
       employeeLocalNumber: e.localNumber,
@@ -299,7 +302,7 @@ export function generateContractOfMandate(): ContractOfMandate[] {
     const pu = pick(rnd, leafPuCodes);
     const loc = pick(rnd, locations).code;
     for (const p of rollingPeriods) {
-      if (p > currentPeriod) continue;
+      if (p > DEMO_ANCHOR_PERIOD) continue;
       out.push({ employeeLocalNumber: localNumber, period: p, puCode: pu, locationCode: loc, active: rnd() > 0.15 });
     }
   }
@@ -313,7 +316,18 @@ export const contractOfMandate = generateContractOfMandate();
 // Vacation hours synthesized from ADMIN vacation phasing since the source workbook
 // does not include time-off data.
 
-export const projects: Project[] = realProjects;
+export function classifyProject(name: string): { kind: Project["kind"]; name: string } {
+  const oppsMatch = name.match(/^(.*?)[\s\-–—]*\bopps?\.?\s*$/i);
+  if (oppsMatch) return { kind: "opportunity", name: oppsMatch[1].trim().replace(/[\s\-–—]+$/, "") };
+  const ambMatch = name.match(/^(.*?)[\s\-–—]*\bamb(?:ition)?\.?\s*$/i);
+  if (ambMatch) return { kind: "ambition", name: ambMatch[1].trim().replace(/[\s\-–—]+$/, "") };
+  return { kind: "project", name };
+}
+
+export const projects: Project[] = realProjects.map((p) => {
+  const classified = classifyProject(p.name);
+  return { ...p, name: classified.name, kind: classified.kind };
+});
 
 export const gfsHours: GfsHours[] = (() => {
   const out: GfsHours[] = [...realGfsHours];
@@ -389,12 +403,12 @@ function baselineForecastValue(
   metric: ForecastMetric,
   rnd: () => number,
 ): number {
-  const base = aggLookup(puAggMap, puCode, currentPeriod);
+  const base = aggLookup(puAggMap, puCode, DEMO_ANCHOR_PERIOD);
   const baseHc = base?.hc ?? hcPerPu[puCode] ?? 0;
   const baseFte = base?.fte ?? baseHc;
   const baseBfte = base?.bfte ?? baseFte * 0.85;
   const baseArve = base?.arve ?? 0.8;
-  const monthsAhead = Math.max(0, periodToIndex(period) - periodToIndex(currentPeriod));
+  const monthsAhead = Math.max(0, periodToIndex(period) - periodToIndex(DEMO_ANCHOR_PERIOD));
   const growth = 1 + monthsAhead * 0.004 + (rnd() - 0.5) * 0.01;
   const fteNow = baseFte * growth;
   const vacShare = vacationPhasingFor(period);
@@ -502,7 +516,7 @@ export function generateForecastCells(): ForecastCell[] {
   for (const cycle of forecastCycles) {
     for (const pu of leafPuCodes) {
       for (const p of rollingPeriods) {
-        const ageMonths = periodToIndex(currentPeriod) - periodToIndex(cycle.periodOpened);
+        const ageMonths = periodToIndex(DEMO_ANCHOR_PERIOD) - periodToIndex(cycle.periodOpened);
         const noise = 1 + ageMonths * 0.01 * (rnd() - 0.5);
         const aggregates: Partial<Record<ForecastMetric, number>> = {};
         for (const metric of metrics) {
@@ -593,7 +607,7 @@ export function generatePipeline(): PipelineOpportunity[] {
   for (let i = 0; i < oppNames.length; i++) {
     const mu = pick(rnd, mus);
     const startOffset = 1 + Math.floor(rnd() * 6);
-    const p = periodAdd(currentPeriod, startOffset);
+    const p = periodAdd(DEMO_ANCHOR_PERIOD, startOffset);
     const prob = 0.2 + rnd() * 0.7;
     const fte = 4 + Math.floor(rnd() * 20);
     out.push({
@@ -657,7 +671,7 @@ export const comments: Comment[] = [
     id: "c1",
     entityType: "pu",
     entityId: "PL01NC04",
-    period: currentPeriod,
+    period: DEMO_ANCHOR_PERIOD,
     body: "**SE2** up +4 FTE vs previous FC — 2 new joiners confirmed for ABB and Daimler ramps.",
     author: "Maciej Koszarek",
     mentions: [],
@@ -667,7 +681,7 @@ export const comments: Comment[] = [
     id: "c2",
     entityType: "pu",
     entityId: "PL01NC08",
-    period: currentPeriod,
+    period: DEMO_ANCHOR_PERIOD,
     body: "Cloud Native ARVE drifting — 3 people on bench since February. Need to align with Sales on the ABB pipeline case.",
     author: "Maciej Koszarek",
     mentions: ["sales"],
@@ -677,7 +691,7 @@ export const comments: Comment[] = [
     id: "c3",
     entityType: "pu",
     entityId: "PL01NC09",
-    period: currentPeriod,
+    period: DEMO_ANCHOR_PERIOD,
     body: "Complex Transformation: 2 leavers in May, backfill already in Joiners_DB pipeline.",
     author: "PU Lead – Complex Transformation",
     mentions: [],
@@ -687,7 +701,7 @@ export const comments: Comment[] = [
     id: "c4",
     entityType: "cycle",
     entityId: "fc-2026-04",
-    period: currentPeriod,
+    period: DEMO_ANCHOR_PERIOD,
     body: "Cycle **FC April 2026** opened. Please submit PU-level forecasts by **April 12**.",
     author: "Maciej Koszarek",
     mentions: ["all-pu-leads"],
@@ -700,7 +714,7 @@ export const comments: Comment[] = [
 export const anomalies: Anomaly[] = [
   {
     id: uid("a-"),
-    period: currentPeriod,
+    period: DEMO_ANCHOR_PERIOD,
     scope: "pu",
     scopeId: "PL01NC08",
     kind: "arve_drift",
@@ -709,7 +723,7 @@ export const anomalies: Anomaly[] = [
   },
   {
     id: uid("a-"),
-    period: currentPeriod,
+    period: DEMO_ANCHOR_PERIOD,
     scope: "pu",
     scopeId: "PL01NC06",
     kind: "hc_jump",
@@ -718,7 +732,7 @@ export const anomalies: Anomaly[] = [
   },
   {
     id: uid("a-"),
-    period: currentPeriod,
+    period: DEMO_ANCHOR_PERIOD,
     scope: "pu",
     scopeId: "PL01NC09",
     kind: "bfte_gap",
@@ -751,8 +765,8 @@ export const dqChecks: DQCheckResult[] = [
     severity: "warning",
     status: "fail",
     failingRows: [
-      { employee: "P0029142", month: currentPeriod, reason: "in GFS, not in HR" },
-      { employee: "P0029188", month: currentPeriod, reason: "in GFS, not in HR" },
+      { employee: "P0029142", month: DEMO_ANCHOR_PERIOD, reason: "in GFS, not in HR" },
+      { employee: "P0029188", month: DEMO_ANCHOR_PERIOD, reason: "in GFS, not in HR" },
     ],
   },
   {

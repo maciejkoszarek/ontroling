@@ -58,7 +58,7 @@ export default function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
         </div>
 
         <div className="hidden md:flex text-[11px] text-fg-muted">
-          <span>As of {periodLabel(demo.currentPeriod, "long")}</span>
+          <span>As of {periodLabel(demo.DEMO_ANCHOR_PERIOD, "long")}</span>
         </div>
 
         <div className="flex-1" />

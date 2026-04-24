@@ -25,8 +25,8 @@ export default function Ingestion() {
         rowCounts: report.result.rowCounts,
         warnings: report.result.warnings,
       });
-    } catch (e: any) {
-      setErr(e.message ?? "Failed to parse workbook.");
+    } catch (e) {
+      setErr((e as Error).message || "Failed to parse workbook.");
     }
     setParsing(false);
   }

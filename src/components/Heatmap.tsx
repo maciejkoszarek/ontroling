@@ -8,6 +8,9 @@ export interface HeatmapCell {
   value: number;
 }
 
+// ECharts callback shape — only `data` is typed; other fields exist but aren't used here.
+type HeatmapEChartsParam = { data: [number, number, number] };
+
 export default function Heatmap({
   rows,
   cols,
@@ -85,7 +88,7 @@ export default function Heatmap({
       backgroundColor: "rgba(15,23,42,0.92)",
       borderColor: "transparent",
       textStyle: { color: "#fff", fontSize: 12 },
-      formatter: (params: any) => {
+      formatter: (params: HeatmapEChartsParam) => {
         const [x, y, v] = params.data;
         const rowLabel = rowLabelFn?.(rows[y]) ?? rows[y];
         const colLabel = colLabelFn?.(cols[x]) ?? cols[x];
@@ -125,7 +128,7 @@ export default function Heatmap({
         label: {
           show: rows.length <= 12 && cols.length <= 24,
           fontSize: 9,
-          formatter: (p: any) => (valueFormatter ? valueFormatter(p.data[2]) : String(Math.round(p.data[2] * 10) / 10)),
+          formatter: (p: HeatmapEChartsParam) => (valueFormatter ? valueFormatter(p.data[2]) : String(Math.round(p.data[2] * 10) / 10)),
         },
         itemStyle: { borderWidth: 1, borderColor: "rgb(var(--bg))" },
       },
@@ -134,7 +137,7 @@ export default function Heatmap({
 
   const onEvents = onCellClick
     ? {
-        click: (params: any) => {
+        click: (params: HeatmapEChartsParam) => {
           const [x, y, v] = params.data;
           onCellClick(rows[y], cols[x], v);
         },

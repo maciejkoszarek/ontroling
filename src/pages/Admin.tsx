@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useAppStore } from "../store";
-import { periodAdd } from "../lib/utils";
-import { Plus, Check, X, Lock, Archive, PenLine, ClipboardCheck } from "lucide-react";
+import { periodAdd, activeCycleYear } from "../lib/utils";
+import { Plus, Check, X, Lock, Archive, PenLine, ClipboardCheck, CalendarDays, RotateCcw } from "lucide-react";
 import type { CycleStatus, Role } from "../types";
+import { defaultEntryForPeriod, indexWorkingCalendar, yearPeriods } from "../lib/workingCalendar";
+import AdminDataBackup from "../components/AdminDataBackup";
 
 const ROLES: Array<{ value: Role; label: string }> = [
   { value: "controller", label: "Controller" },
@@ -28,6 +30,21 @@ export default function Admin() {
   const setDensity = useAppStore((s) => s.setDensity);
   const pus = useAppStore((s) => s.productionUnits);
   const mus = useAppStore((s) => s.marketUnits);
+  const workingCalendar = useAppStore((s) => s.workingCalendar);
+  const setWorkingCalendarEntry = useAppStore((s) => s.setWorkingCalendarEntry);
+  const resetWorkingCalendar = useAppStore((s) => s.resetWorkingCalendar);
+  const activeCycleId = useAppStore((s) => s.activeCycleId);
+  const defaultYear = activeCycleYear(cycles, activeCycleId);
+  const [calendarYear, setCalendarYear] = useState<number>(defaultYear);
+  const calendarIndex = useMemo(() => indexWorkingCalendar(workingCalendar), [workingCalendar]);
+  const calendarRows = useMemo(() => {
+    return yearPeriods(calendarYear).map((period) => {
+      const entry = calendarIndex.get(period) ?? defaultEntryForPeriod(period);
+      return { period, entry };
+    });
+  }, [calendarYear, calendarIndex]);
+  const yearDays = calendarRows.reduce((s, r) => s + r.entry.workingDays, 0);
+  const yearHours = calendarRows.reduce((s, r) => s + r.entry.workingHours, 0);
 
   const [openingLabel, setOpeningLabel] = useState("FC " + new Date().toLocaleString(undefined, { month: "long", year: "numeric" }));
   const [openingPeriod, setOpeningPeriod] = useState<string>(() => {
@@ -181,6 +198,112 @@ export default function Admin() {
           </table>
         </div>
       </div>
+
+      <div className="card p-4">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h2 className="text-sm font-semibold flex items-center gap-2">
+            <CalendarDays className="w-4 h-4" /> Working calendar
+          </h2>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-fg-muted">Year</label>
+            <input
+              type="number"
+              className="input !w-24"
+              value={calendarYear}
+              onChange={(e) => setCalendarYear(Number(e.target.value) || defaultYear)}
+            />
+            <button
+              className="btn"
+              onClick={() => {
+                if (confirm(`Reset working calendar to defaults (2024–2028)? Any manual edits will be lost.`)) {
+                  resetWorkingCalendar();
+                }
+              }}
+              title="Recompute from Polish public holidays (8h/day)"
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> Reset to defaults
+            </button>
+          </div>
+        </div>
+        <p className="text-xs text-fg-muted mb-2">
+          Working days and hours per period. Used app-wide for FTE ↔ hours conversions (project staffing, ARVE,
+          People views). Defaults are derived from Polish public holidays × 8h.
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr>
+                <th className="table-th">Period</th>
+                <th className="table-th text-right">Working days</th>
+                <th className="table-th text-right">Working hours</th>
+                <th className="table-th text-right">Hours / day</th>
+                <th className="table-th text-right"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {calendarRows.map(({ period, entry }) => {
+                const dflt = defaultEntryForPeriod(period);
+                const isCustom = entry.workingDays !== dflt.workingDays || entry.workingHours !== dflt.workingHours;
+                const hoursPerDay = entry.workingDays > 0 ? entry.workingHours / entry.workingDays : 0;
+                return (
+                  <tr key={period} className="hover:bg-bg-hover">
+                    <td className="table-td font-mono text-[12px]">{period}</td>
+                    <td className="table-td text-right">
+                      <input
+                        type="number"
+                        className="input !w-20 text-right"
+                        value={entry.workingDays}
+                        min={0}
+                        max={31}
+                        onChange={(e) =>
+                          setWorkingCalendarEntry(period, { workingDays: Math.max(0, Number(e.target.value) || 0) })
+                        }
+                      />
+                    </td>
+                    <td className="table-td text-right">
+                      <input
+                        type="number"
+                        className="input !w-24 text-right"
+                        value={entry.workingHours}
+                        min={0}
+                        max={400}
+                        onChange={(e) =>
+                          setWorkingCalendarEntry(period, { workingHours: Math.max(0, Number(e.target.value) || 0) })
+                        }
+                      />
+                    </td>
+                    <td className="table-td text-right text-fg-muted tabular-nums">
+                      {hoursPerDay > 0 ? hoursPerDay.toFixed(1) : "—"}
+                    </td>
+                    <td className="table-td text-right">
+                      {isCustom && (
+                        <button
+                          className="btn-ghost text-[11px]"
+                          onClick={() => setWorkingCalendarEntry(period, { workingDays: dflt.workingDays, workingHours: dflt.workingHours })}
+                          title="Revert this period to default"
+                        >
+                          revert
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              <tr className="bg-bg-muted font-semibold border-t-2 border-border">
+                <td className="table-td">Year {calendarYear}</td>
+                <td className="table-td text-right tabular-nums">{yearDays}</td>
+                <td className="table-td text-right tabular-nums">{yearHours}</td>
+                <td className="table-td text-right text-fg-muted tabular-nums">
+                  {yearDays > 0 ? (yearHours / yearDays).toFixed(1) : "—"}
+                </td>
+                <td className="table-td"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <AdminDataBackup />
 
       <div className="card p-4">
         <h2 className="text-sm font-semibold mb-3">RBAC matrix</h2>

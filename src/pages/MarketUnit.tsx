@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import ReactECharts from "echarts-for-react";
 import { useAppStore } from "../store";
-import { rollingPeriods, currentPeriod } from "../lib/demoData";
+import { rollingPeriods, DEMO_ANCHOR_PERIOD } from "../lib/demoData";
 import Heatmap from "../components/Heatmap";
 import { formatNumber, periodLabel } from "../lib/utils";
 
@@ -12,9 +12,9 @@ export default function MarketUnit() {
   const projects = useAppStore((s) => s.projects);
   const projectDemand = useAppStore((s) => s.projectDemand);
   const [metric, setMetric] = useState<Metric>("fte");
-  const [hoverMonth, setHoverMonth] = useState<string | null>(currentPeriod);
+  const [hoverMonth, setHoverMonth] = useState<string | null>(DEMO_ANCHOR_PERIOD);
 
-  const cols = rollingPeriods.slice(rollingPeriods.indexOf(currentPeriod) - 5, rollingPeriods.indexOf(currentPeriod) + 13);
+  const cols = rollingPeriods.slice(rollingPeriods.indexOf(DEMO_ANCHOR_PERIOD) - 5, rollingPeriods.indexOf(DEMO_ANCHOR_PERIOD) + 13);
 
   const fteByMuPeriod = useMemo(() => {
     const map = new Map<string, number>();
@@ -33,7 +33,7 @@ export default function MarketUnit() {
     value: fteByMuPeriod.get(`${mu.code}::${p}`) ?? 0,
   }))).flat();
 
-  const selectedMonth = hoverMonth ?? currentPeriod;
+  const selectedMonth = hoverMonth ?? DEMO_ANCHOR_PERIOD;
   const stacked = mus.map((mu) => ({
     name: mu.displayName,
     value: fteByMuPeriod.get(`${mu.code}::${selectedMonth}`) ?? 0,

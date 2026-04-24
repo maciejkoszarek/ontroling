@@ -1,17 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAppStore } from "../store";
-import { aggregateProjects, year2026Periods, employeeMap } from "../lib/projectHelpers";
-import { cn, formatNumber, formatPct } from "../lib/utils";
+import { aggregateProjects, yearPeriods, employeeMap } from "../lib/projectHelpers";
+import { hoursForPeriod, indexWorkingCalendar } from "../lib/workingCalendar";
+import { cn, formatNumber, formatPct, activeCycleYear } from "../lib/utils";
 import { ArrowLeft, ArrowDown, ArrowUp, Briefcase, Building2, ChevronDown, ChevronRight, Users, UserPlus, Pencil } from "lucide-react";
 import ReactECharts from "echarts-for-react";
 import KpiCard from "../components/KpiCard";
-import { currentPeriod, puLabel } from "../lib/demoData";
+import { DEMO_ANCHOR_PERIOD, puLabel } from "../lib/demoData";
 import { AssignProjectModal } from "../components/forms/PeopleForms";
 import { ProjectFormModal } from "../components/forms/ProjectForms";
-
-const HOURS_PER_FTE = 160;
-const PERIODS = year2026Periods();
 
 export default function ProjectDetail() {
   const { projectNumber = "" } = useParams<{ projectNumber: string }>();
@@ -20,14 +18,29 @@ export default function ProjectDetail() {
   const gfsHours = useAppStore((s) => s.gfsHours);
   const snapshots = useAppStore((s) => s.snapshots);
   const employees = useAppStore((s) => s.employees);
+  const cycles = useAppStore((s) => s.cycles);
+  const activeCycleId = useAppStore((s) => s.activeCycleId);
+  const workingCalendar = useAppStore((s) => s.workingCalendar);
 
   const unassign = useAppStore((s) => s.unassignEmployeeFromProject);
   const assign = useAppStore((s) => s.assignEmployeeToProject);
   const project = projects.find((p) => p.projectNumber === projectNumber);
-  const periods = PERIODS;
-  const aggMap = useMemo(() => aggregateProjects(gfsHours, snapshots), [gfsHours, snapshots]);
+  const activePeriod = cycles.find((c) => c.id === activeCycleId)?.periodOpened;
+  const year = activeCycleYear(cycles, activeCycleId);
+  const yy = String(year).slice(-2);
+  const periods = useMemo(() => yearPeriods(year), [year]);
+  const calIdx = useMemo(() => indexWorkingCalendar(workingCalendar), [workingCalendar]);
+  const aggMap = useMemo(
+    () => aggregateProjects(gfsHours, snapshots, workingCalendar),
+    [gfsHours, snapshots, workingCalendar],
+  );
   const empMap = useMemo(() => employeeMap(employees), [employees]);
-  const [selectedPeriod, setSelectedPeriod] = useState(currentPeriod);
+  const yearFullHours = useMemo(
+    () => periods.reduce((s, p) => s + hoursForPeriod(calIdx, p), 0),
+    [periods, calIdx],
+  );
+  const avgMonthlyHours = yearFullHours / 12 || 160;
+  const [selectedPeriod, setSelectedPeriod] = useState(activePeriod ?? DEMO_ANCHOR_PERIOD);
   const [assignOpen, setAssignOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [showUnit, setShowUnit] = useState<"hours" | "fte">("hours");
@@ -47,7 +60,8 @@ export default function ProjectDetail() {
 
   const beginEdit = (localNumber: string, period: string, hours: number) => {
     setEditingCell({ localNumber, period });
-    const v = showUnit === "hours" ? hours : hours / HOURS_PER_FTE;
+    const fullHours = hoursForPeriod(calIdx, period);
+    const v = showUnit === "hours" ? hours : fullHours > 0 ? hours / fullHours : 0;
     setDraft(v > 0 ? (showUnit === "hours" ? String(Math.round(v)) : v.toFixed(2)) : "");
   };
   const commitEdit = () => {
@@ -58,7 +72,8 @@ export default function ProjectDetail() {
       setEditingCell(null);
       return;
     }
-    const hours = showUnit === "hours" ? num : num * HOURS_PER_FTE;
+    const fullHours = hoursForPeriod(calIdx, editingCell.period);
+    const hours = showUnit === "hours" ? num : num * fullHours;
     if (hours <= 0) {
       unassign({ localNumber: editingCell.localNumber, projectNumber: project.projectNumber, period: editingCell.period });
     } else {
@@ -226,7 +241,7 @@ export default function ProjectDetail() {
       return next;
     });
   };
-  const fmtCell = (hours: number) => showUnit === "hours" ? formatNumber(hours, 0) : formatNumber(hours / HOURS_PER_FTE, 2);
+  const fmtCell = (hours: number) => showUnit === "hours" ? formatNumber(hours, 0) : formatNumber(hours / avgMonthlyHours, 2);
 
   if (!project) {
     return (
@@ -256,7 +271,7 @@ export default function ProjectDetail() {
     grid: { left: 48, right: 48, top: 24, bottom: 40 },
     tooltip: { trigger: "axis" },
     legend: { bottom: 0 },
-    xAxis: { type: "category", data: periods.map((p) => p.slice(5, 7) + "/26") },
+    xAxis: { type: "category", data: periods.map((p) => `${p.slice(5, 7)}/${yy}`) },
     yAxis: [
       { type: "value", name: "FTE", position: "left" },
       { type: "value", name: "ARVE %", position: "right", min: 0, max: 110, axisLabel: { formatter: "{value}%" } },
@@ -287,6 +302,24 @@ export default function ProjectDetail() {
             <span>{muName}</span>
             <span>·</span>
             <span className="font-mono text-[11px]">{project.projectNumber}</span>
+            <span
+              className={
+                project.kind === "project"
+                  ? "pill-brand"
+                  : project.kind === "opportunity"
+                    ? "pill-warning"
+                    : "chip"
+              }
+              title={
+                project.kind === "project"
+                  ? "Confirmed engagement"
+                  : project.kind === "opportunity"
+                    ? "Sales pipeline, not yet signed"
+                    : "Aspirational / target account"
+              }
+            >
+              {project.kind}
+            </span>
             <span className={project.isBillable ? "pill-success" : "chip"}>
               {project.isBillable ? "billable" : "overhead"}
             </span>
@@ -342,13 +375,13 @@ export default function ProjectDetail() {
       </div>
 
       <div className="card p-4">
-        <h2 className="text-sm font-semibold mb-2">FTE demand & ARVE — 2026</h2>
+        <h2 className="text-sm font-semibold mb-2">FTE demand & ARVE — {year}</h2>
         <ReactECharts style={{ height: 320 }} option={chartOption} />
       </div>
 
       <div className="card p-0 overflow-x-auto">
         <div className="px-4 py-3 flex items-center justify-between flex-wrap gap-2 border-b border-border">
-          <h2 className="text-sm font-semibold">Monthly totals — 2026</h2>
+          <h2 className="text-sm font-semibold">Monthly totals — {year}</h2>
           <p className="text-xs text-fg-muted">bFTE counts billable projects only; ARVE is hours-weighted.</p>
         </div>
         <table className="w-full text-xs">
@@ -365,7 +398,7 @@ export default function ProjectDetail() {
                   onClick={() => setSelectedPeriod(p)}
                   title={`Focus KPIs on ${p}`}
                 >
-                  {p.slice(5, 7)}/26
+                  {p.slice(5, 7)}/{yy}
                 </th>
               ))}
               <th className="table-th text-right" title="Average across 12 months">Avg</th>
@@ -420,7 +453,7 @@ export default function ProjectDetail() {
         <div className="px-4 py-3 flex items-center justify-between flex-wrap gap-2 border-b border-border">
           <h2 className="text-sm font-semibold flex items-center gap-2">
             <Users className="w-4 h-4" />
-            People on project — 2026
+            People on project — {year}
             <span className="chip">{personMatrix.length}</span>
           </h2>
           <div className="flex items-center gap-2">
@@ -503,7 +536,7 @@ export default function ProjectDetail() {
                   {p.slice(5, 7)}{sortIcon(`m${i}` as typeof sortKey)}
                 </th>
               ))}
-              <th className="table-th text-right cursor-pointer hover:bg-brand/5" onClick={() => toggleSort("total")} title="Total across 2026">
+              <th className="table-th text-right cursor-pointer hover:bg-brand/5" onClick={() => toggleSort("total")} title={`Total across ${year}`}>
                 Total{sortIcon("total")}
               </th>
               <th className="table-th text-right cursor-pointer hover:bg-brand/5" onClick={() => toggleSort("months")} title="Months with staffing">
@@ -554,7 +587,8 @@ export default function ProjectDetail() {
                         </td>
                         {periods.map((p) => {
                           const hours = r.byPeriod.get(p) ?? 0;
-                          const fte = hours / HOURS_PER_FTE;
+                          const fteFullHours = hoursForPeriod(calIdx, p);
+                          const fte = fteFullHours > 0 ? hours / fteFullHours : 0;
                           const isSelected = p === selectedPeriod;
                           const isEditing = editingCell?.localNumber === e.localNumber && editingCell?.period === p;
                           const display = hours === 0
@@ -597,7 +631,7 @@ export default function ProjectDetail() {
                           );
                         })}
                         <td className="table-td text-right tabular-nums font-medium">
-                          {showUnit === "hours" ? formatNumber(r.total, 0) : formatNumber(r.total / HOURS_PER_FTE, 2)}
+                          {showUnit === "hours" ? formatNumber(r.total, 0) : formatNumber(r.total / avgMonthlyHours, 2)}
                         </td>
                         <td className="table-td text-right tabular-nums text-fg-muted">{r.activeMonths}</td>
                       </tr>
@@ -625,7 +659,7 @@ export default function ProjectDetail() {
             {groups.length === 0 && (
               <tr>
                 <td colSpan={periods.length + 4} className="table-td text-center text-fg-muted py-6">
-                  No staffing recorded for 2026.
+                  No staffing recorded for {year}.
                 </td>
               </tr>
             )}

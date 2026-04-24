@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useAppStore } from "../store";
-import { puLabel, currentPeriod } from "../lib/demoData";
+import { puLabel, DEMO_ANCHOR_PERIOD } from "../lib/demoData";
 import { formatPct, formatNumber, periodAdd } from "../lib/utils";
 import { Sparkles } from "lucide-react";
 
@@ -13,7 +13,7 @@ export default function Bench() {
 
   // rolling 3m ARVE per employee
   const arveMap = useMemo(() => {
-    const last3 = [periodAdd(currentPeriod, -2), periodAdd(currentPeriod, -1), currentPeriod];
+    const last3 = [periodAdd(DEMO_ANCHOR_PERIOD, -2), periodAdd(DEMO_ANCHOR_PERIOD, -1), DEMO_ANCHOR_PERIOD];
     const byEmp = new Map<string, number[]>();
     for (const s of snapshots) {
       if (!last3.includes(s.period)) continue;
@@ -25,11 +25,15 @@ export default function Bench() {
     return out;
   }, [snapshots]);
 
-  const bench = employees
-    .map((e) => ({ e, arve: arveMap.get(e.localNumber) ?? 0 }))
-    .filter((x) => x.arve > 0 && x.arve < 0.65)
-    .sort((a, b) => a.arve - b.arve)
-    .slice(0, 40);
+  const bench = useMemo(
+    () =>
+      employees
+        .map((e) => ({ e, arve: arveMap.get(e.localNumber) ?? 0 }))
+        .filter((x) => x.arve > 0 && x.arve < 0.65)
+        .sort((a, b) => a.arve - b.arve)
+        .slice(0, 40),
+    [employees, arveMap],
+  );
 
   const selectedEmp = bench.find((b) => b.e.localNumber === selected) ?? bench[0];
 
@@ -39,7 +43,7 @@ export default function Bench() {
     const empSkills = new Set(selectedEmp.e.skills.map((s) => s.toLowerCase()));
     return projects
       .map((p) => {
-        const projDemand = projectDemand.filter((d) => d.projectNumber === p.projectNumber && d.period >= currentPeriod).slice(0, 6);
+        const projDemand = projectDemand.filter((d) => d.projectNumber === p.projectNumber && d.period >= DEMO_ANCHOR_PERIOD).slice(0, 6);
         const avgDemand = projDemand.reduce((a, d) => a + d.fteDemand, 0) / Math.max(1, projDemand.length);
         const tagHits = (p.tags ?? []).filter((t) => empSkills.has(t.toLowerCase())).length;
         const nameHits = selectedEmp.e.skills.filter((s) => p.name.toLowerCase().includes(s.toLowerCase())).length;

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAppStore } from "../../store";
-import { leafPuCodes, puByCode, rollingPeriods, currentPeriod } from "../../lib/demoData";
-import { uid } from "../../lib/utils";
-import { cn } from "../../lib/utils";
+import { leafPuCodes, puByCode, rollingPeriods } from "../../lib/demoData";
+import { uid, currentPeriod, cn } from "../../lib/utils";
+import { hoursForPeriod } from "../../lib/workingCalendar";
 import type { ClearanceLevel, Employee, JobFunction, Period } from "../../types";
 import Modal, { FieldRow } from "../Modal";
 
@@ -30,7 +30,7 @@ export function AddPersonModal({ open, onClose }: CommonProps) {
   const [gradeCode, setGradeCode] = useState(grades[1]?.code ?? "B1");
   const [jobFunction, setJobFunction] = useState<JobFunction>("CSS");
   const [locationCode, setLocationCode] = useState(locations[0]?.code ?? "");
-  const [startDate, setStartDate] = useState<string>(`${currentPeriod}-01`);
+  const [startDate, setStartDate] = useState<string>(`${currentPeriod()}-01`);
   const [fteCapacity, setFteCapacity] = useState<number>(1);
   const [engagement, setEngagement] = useState<string>("UoP");
   const [skills, setSkills] = useState<string>("");
@@ -204,7 +204,7 @@ export function AddJoinerModal({ open, onClose }: CommonProps) {
   const [gradeCode, setGradeCode] = useState(grades[1]?.code ?? "B1");
   const [locationCode, setLocationCode] = useState(locations[0]?.code ?? "");
   const [role, setRole] = useState("Developer");
-  const [startDate, setStartDate] = useState<string>(`${currentPeriod}-15`);
+  const [startDate, setStartDate] = useState<string>(`${currentPeriod()}-15`);
   const [source, setSource] = useState<"ATS" | "HR" | "referral" | "pipeline">("ATS");
   const [status, setStatus] = useState<"planned" | "actual">("planned");
 
@@ -308,7 +308,7 @@ export function AddLeaverModal({
 
   const active = useMemo(() => employees.filter((e) => !e.endDate), [employees]);
   const [localNumber, setLocalNumber] = useState<string>(preselectLocalNumber ?? active[0]?.localNumber ?? "");
-  const [endDate, setEndDate] = useState<string>(`${currentPeriod}-28`);
+  const [endDate, setEndDate] = useState<string>(`${currentPeriod()}-28`);
   const [reason, setReason] = useState<"voluntary" | "involuntary" | "contract_end" | "other">("voluntary");
   const [query, setQuery] = useState("");
 
@@ -408,7 +408,7 @@ export function TransferModal({
 
   const [localNumber, setLocalNumber] = useState<string>(preselectLocalNumber ?? "");
   const [toPuCode, setToPuCode] = useState<string>(leafPuCodes[0] ?? "");
-  const [effectivePeriod, setEffectivePeriod] = useState<Period>(currentPeriod);
+  const [effectivePeriod, setEffectivePeriod] = useState<Period>(currentPeriod());
   const [reason, setReason] = useState("");
   const [query, setQuery] = useState("");
 
@@ -497,8 +497,6 @@ export function TransferModal({
 
 /* -------------------- Assign to project -------------------- */
 
-const HOURS_PER_FTE = 160;
-
 export function AssignProjectModal({
   open,
   onClose,
@@ -508,11 +506,12 @@ export function AssignProjectModal({
   const assign = useAppStore((s) => s.assignEmployeeToProject);
   const projects = useAppStore((s) => s.projects);
   const employees = useAppStore((s) => s.employees);
+  const workingCalendar = useAppStore((s) => s.workingCalendar);
   const active = useMemo(() => employees.filter((e: Employee) => !e.endDate), [employees]);
 
   const [localNumber, setLocalNumber] = useState(preselectLocalNumber ?? "");
   const [projectNumber, setProjectNumber] = useState(preselectProjectNumber ?? projects[0]?.projectNumber ?? "");
-  const [period, setPeriod] = useState<Period>(currentPeriod);
+  const [period, setPeriod] = useState<Period>(currentPeriod());
   const [fte, setFte] = useState<number>(1);
   const [query, setQuery] = useState("");
 
@@ -522,7 +521,7 @@ export function AssignProjectModal({
     if (preselectLocalNumber) setLocalNumber(preselectLocalNumber);
     if (preselectProjectNumber) setProjectNumber(preselectProjectNumber);
     setFte(1);
-    setPeriod(currentPeriod);
+    setPeriod(currentPeriod());
   }, [open, preselectLocalNumber, preselectProjectNumber]);
 
   const preselectedEmployee = preselectLocalNumber
@@ -537,7 +536,8 @@ export function AssignProjectModal({
       .slice(0, 80);
   }, [active, query]);
 
-  const hours = Math.round(fte * HOURS_PER_FTE);
+  const fullHours = hoursForPeriod(workingCalendar, period);
+  const hours = Math.round(fte * fullHours);
 
   function submit() {
     if (!localNumber || !projectNumber || fte <= 0) return;

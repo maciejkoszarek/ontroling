@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useAppStore } from "../store";
 import { cn, formatPct } from "../lib/utils";
 import { ArrowRightLeft, Briefcase, ChevronDown, ChevronRight, ChevronUp, ShieldCheck, Search, Tag, UserMinus, UserPlus, Users, X } from "lucide-react";
-import { currentPeriod, puLabel } from "../lib/demoData";
+import { DEMO_ANCHOR_PERIOD, puLabel } from "../lib/demoData";
 import { trailingArve, employeeProjectsForPeriod } from "../lib/projectHelpers";
 import {
   AddPersonModal,
@@ -22,7 +22,7 @@ const ROWS_PER_PAGE = 50;
 function formatJoinLeave(iso?: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
-  if (isNaN(d.getTime())) return iso;
+  if (!Number.isFinite(d.getTime())) return iso;
   const month = d.toLocaleString("en", { month: "short" });
   return `${month} ${String(d.getFullYear()).slice(2)}`;
 }
@@ -320,8 +320,8 @@ export default function People() {
 
   const enriched = useMemo(() => {
     return employees.map((e) => {
-      const arve = trailingArve(e.localNumber, currentPeriod, snapshots, 3);
-      const currentAssignments = employeeProjectsForPeriod(e.localNumber, currentPeriod, gfsHours);
+      const arve = trailingArve(e.localNumber, DEMO_ANCHOR_PERIOD, snapshots, 3);
+      const currentAssignments = employeeProjectsForPeriod(e.localNumber, DEMO_ANCHOR_PERIOD, gfsHours);
       const totalHours = currentAssignments.reduce((s, a) => s + a.hours, 0);
       const uniqueProjects = Array.from(new Set(currentAssignments.map((a) => a.projectNumber)));
       return { e, arve, totalHours, projectNumbers: uniqueProjects };
@@ -598,7 +598,7 @@ export default function People() {
               <SortTh col="joined" label="Joined" sort={sort} onToggle={toggleSort} />
               <SortTh col="left" label="Left" sort={sort} onToggle={toggleSort} />
               <SortTh col="arve" label="ARVE (3m)" align="right" sort={sort} onToggle={toggleSort} />
-              <SortTh col="projects" label={`Projects · ${currentPeriod}`} sort={sort} onToggle={toggleSort} />
+              <SortTh col="projects" label={`Projects · ${DEMO_ANCHOR_PERIOD}`} sort={sort} onToggle={toggleSort} />
               <SortTh col="capabilities" label="Capabilities" sort={sort} onToggle={toggleSort} />
               <th className="table-th text-center" title="German speaker">DE</th>
               <SortTh col="clearance" label="Clearance" sort={sort} onToggle={toggleSort} />

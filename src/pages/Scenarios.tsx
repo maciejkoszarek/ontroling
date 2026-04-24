@@ -2,6 +2,40 @@ import { useState } from "react";
 import { Plus, Play, Users, Briefcase } from "lucide-react";
 import { useAppStore } from "../store";
 import { puLabel } from "../lib/demoData";
+import type { ScenarioChange } from "../types";
+
+function pickString(payload: Record<string, unknown>, key: string): string {
+  const value = payload[key];
+  return typeof value === "string" ? value : "";
+}
+
+function pickNumber(payload: Record<string, unknown>, key: string): number {
+  const value = payload[key];
+  return typeof value === "number" ? value : 0;
+}
+
+function describeChange(c: ScenarioChange): string {
+  switch (c.type) {
+    case "add_joiner": {
+      const count = pickNumber(c.payload, "count");
+      const grade = pickString(c.payload, "grade");
+      const puCode = pickString(c.payload, "puCode");
+      return `+${count} ${grade} in ${puLabel(puCode)} (${c.effectivePeriod})`;
+    }
+    case "headcount_delta": {
+      const delta = pickNumber(c.payload, "delta");
+      const puCode = pickString(c.payload, "puCode");
+      const sign = delta > 0 ? "+" : "";
+      return `${sign}${delta} HC in ${puLabel(puCode)} (${c.effectivePeriod})`;
+    }
+    case "project_ramp": {
+      const project = pickString(c.payload, "project") || "project";
+      return `ramp ${project} ${c.effectivePeriod}`;
+    }
+    default:
+      return "";
+  }
+}
 
 export default function Scenarios() {
   const scenarios = useAppStore((s) => s.scenarios);
@@ -80,11 +114,7 @@ export default function Scenarios() {
                   ) : (
                     <Briefcase className="w-3.5 h-3.5 text-fg-muted" />
                   )}
-                  <span className="text-xs">
-                    {c.type === "add_joiner" && `+${(c.payload as any).count} ${(c.payload as any).grade} in ${puLabel((c.payload as any).puCode)} (${c.effectivePeriod})`}
-                    {c.type === "headcount_delta" && `${(c.payload as any).delta > 0 ? "+" : ""}${(c.payload as any).delta} HC in ${puLabel((c.payload as any).puCode)} (${c.effectivePeriod})`}
-                    {c.type === "project_ramp" && `ramp ${(c.payload as any).project ?? "project"} ${c.effectivePeriod}`}
-                  </span>
+                  <span className="text-xs">{describeChange(c)}</span>
                 </li>
               ))}
             </ul>
