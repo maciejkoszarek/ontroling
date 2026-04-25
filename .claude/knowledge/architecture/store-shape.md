@@ -90,7 +90,18 @@ Categories:
   materialize an `Employee` when the joiner is `status === "actual"` with a
   `localNumber` that does not already exist.
 - **Projects**: `addProject`, `updateProject` — validate that the
-  `projectNumber` is unique (I15), trim strings, append audit.
+  `projectNumber` is unique (I15), trim strings, append audit. Both manage
+  `Project.commitProbability` (I30): `addProject` applies kind defaults
+  (`project → 1.0`, `opportunity → 0.5`, `ambition → 0.3`) and clamps to
+  `[0, 1]`; `updateProject` resets to the new kind's default on kind change,
+  forces `1.0` when kind is `project`, and clamps out-of-range inputs with a
+  `"validation-clamp"` audit entry (`{ entity: "project", field:
+  "commitProbability", reason: "I30 range" }`). Read sites must resolve
+  effective probability via `getCommitProbability(p)` from
+  [src/lib/projectHelpers.ts](src/lib/projectHelpers.ts) — stored values for
+  `project`-kind rows are ignored. FTE demand roll-ups on Cockpit, Projects,
+  MarketUnit, and Bench apply `weightedDemand(fte, project)` so
+  opportunities and ambitions contribute their probability-scaled share.
 - **Capabilities**: `addCapability`, `renameCapability`, `removeCapability`,
   `setEmployeeCapabilities`, `setEmployeeGermanSpeaker`,
   `setEmployeeClearanceLevel`. Capabilities are a flat taxonomy; removing one

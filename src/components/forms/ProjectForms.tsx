@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAppStore } from "../../store";
 import type { Project, ProjectKind } from "../../types";
+import { DEFAULT_COMMIT_PROBABILITY, getCommitProbability } from "../../lib/projectHelpers";
 import Modal, { FieldRow } from "../Modal";
 
 type CommonProps = { open: boolean; onClose: () => void };
@@ -49,6 +50,9 @@ export function ProjectFormModal({
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [description, setDescription] = useState("");
+  const [commitProbability, setCommitProbability] = useState<number>(
+    DEFAULT_COMMIT_PROBABILITY.project,
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -63,6 +67,7 @@ export function ProjectFormModal({
       setStartDate(editing.startDate ?? "");
       setEndDate(editing.endDate ?? "");
       setDescription(editing.description ?? "");
+      setCommitProbability(getCommitProbability(editing));
     } else {
       setProjectNumber(nextProjectNumber(projects));
       setName("");
@@ -74,6 +79,7 @@ export function ProjectFormModal({
       setStartDate("");
       setEndDate("");
       setDescription("");
+      setCommitProbability(DEFAULT_COMMIT_PROBABILITY.project);
     }
   }, [open, editing, projects, mus]);
 
@@ -86,6 +92,11 @@ export function ProjectFormModal({
     customer.trim().length > 0 &&
     marketUnit.length > 0 &&
     !duplicate;
+
+  function handleKindChange(next: ProjectKind) {
+    setKind(next);
+    setCommitProbability(next === "project" ? 1.0 : DEFAULT_COMMIT_PROBABILITY[next]);
+  }
 
   function submit() {
     if (!canSubmit) return;
@@ -100,6 +111,7 @@ export function ProjectFormModal({
         startDate: startDate || undefined,
         endDate: endDate || undefined,
         description,
+        commitProbability: kind === "project" ? 1.0 : commitProbability,
       });
     } else {
       addProject({
@@ -113,6 +125,7 @@ export function ProjectFormModal({
         startDate: startDate || undefined,
         endDate: endDate || undefined,
         description,
+        commitProbability: kind === "project" ? 1.0 : commitProbability,
       });
     }
     onClose();
@@ -172,12 +185,48 @@ export function ProjectFormModal({
                   type="button"
                   key={o.value}
                   className={kind === o.value ? "pill-brand" : "chip"}
-                  onClick={() => setKind(o.value)}
+                  onClick={() => handleKindChange(o.value)}
                 >
                   {o.label}
                 </button>
               ))}
             </div>
+          </FieldRow>
+        </div>
+        <div className="col-span-2">
+          <FieldRow
+            label={
+              kind === "project"
+                ? "Commit probability (fixed)"
+                : `Commit probability (default ${DEFAULT_COMMIT_PROBABILITY[kind].toFixed(2)})`
+            }
+            hint={
+              kind === "project"
+                ? "Fixed for committed projects."
+                : "Weight applied to FTE demand when rolling up. Range 0.00 – 1.00."
+            }
+          >
+            {kind === "project" ? (
+              <input
+                className="input tabular-nums"
+                value="1.00"
+                disabled
+                readOnly
+              />
+            ) : (
+              <input
+                type="number"
+                className="input tabular-nums"
+                min={0}
+                max={1}
+                step={0.05}
+                value={commitProbability}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (Number.isFinite(n)) setCommitProbability(Math.max(0, Math.min(1, n)));
+                }}
+              />
+            )}
           </FieldRow>
         </div>
         <FieldRow label="Status" required>

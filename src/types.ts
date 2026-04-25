@@ -58,6 +58,12 @@ export interface Project {
   endDate?: string;
   tags: string[];
   description?: string;
+  /**
+   * Probability that this engagement's FTE demand materializes. In [0, 1].
+   * Kind `project` is always 1.0 (committed); `opportunity` defaults to 0.5;
+   * `ambition` defaults to 0.3. Resolve via `getCommitProbability`. I30.
+   */
+  commitProbability?: number;
 }
 
 export type ClearanceLevel = "none" | "SU1" | "SU2";

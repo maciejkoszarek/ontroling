@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useAppStore } from "../store";
 import { cn, formatNumber, activeCycleYear } from "../lib/utils";
 import { ArrowDown, ArrowUp, Briefcase, ChevronDown, ChevronRight, Lightbulb, Pencil, Plus, Search, Target } from "lucide-react";
-import { aggregateProjects, yearPeriods } from "../lib/projectHelpers";
+import { aggregateProjects, getCommitProbability, yearPeriods } from "../lib/projectHelpers";
 import { ProjectFormModal } from "../components/forms/ProjectForms";
 import type { Project, ProjectKind } from "../types";
 
@@ -57,6 +57,7 @@ export default function Projects() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Project | undefined>(undefined);
+  const [demandMode, setDemandMode] = useState<"weighted" | "raw">("weighted");
 
   const periods = useMemo(() => yearPeriods(year), [year]);
   const aggMap = useMemo(
@@ -75,15 +76,29 @@ export default function Projects() {
     p: Project;
     monthly: number[];
     total: number;
+    rawMonthly: number[];
+    rawTotal: number;
+    prob: number;
   };
 
   const rows: Row[] = useMemo(() => {
     return projects.map((p) => {
-      const monthly = periods.map((period) => aggMap.get(`${p.projectNumber}::${period}`)?.fte ?? 0);
-      const total = monthly.reduce((s, v) => s + v, 0);
-      return { p, monthly, total };
+      const rawMonthly = periods.map((period) => aggMap.get(`${p.projectNumber}::${period}`)?.fte ?? 0);
+      const prob = getCommitProbability(p);
+      const weightedMonthly = rawMonthly.map((v) => v * prob);
+      const rawTotal = rawMonthly.reduce((s, v) => s + v, 0);
+      const weightedTotal = weightedMonthly.reduce((s, v) => s + v, 0);
+      const useWeighted = demandMode === "weighted";
+      return {
+        p,
+        monthly: useWeighted ? weightedMonthly : rawMonthly,
+        total: useWeighted ? weightedTotal : rawTotal,
+        rawMonthly,
+        rawTotal,
+        prob,
+      };
     });
-  }, [projects, aggMap, periods]);
+  }, [projects, aggMap, periods, demandMode]);
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -130,6 +145,7 @@ export default function Projects() {
     rows: Row[];
     subMonthly: number[];
     subTotal: number;
+    subRawTotal: number;
   };
   const groups: Group[] = useMemo(() => {
     const keyOf = (p: Project): string => {
@@ -159,7 +175,8 @@ export default function Projects() {
     for (const [k, groupRows] of map.entries()) {
       const subMonthly = periods.map((_, i) => groupRows.reduce((s, r) => s + (r.monthly[i] ?? 0), 0));
       const subTotal = groupRows.reduce((s, r) => s + r.total, 0);
-      out.push({ key: k, label: labelOf(k), rows: groupRows, subMonthly, subTotal });
+      const subRawTotal = groupRows.reduce((s, r) => s + r.rawTotal, 0);
+      out.push({ key: k, label: labelOf(k), rows: groupRows, subMonthly, subTotal, subRawTotal });
     }
     out.sort((a, b) => a.label.localeCompare(b.label));
     return out;
@@ -168,10 +185,15 @@ export default function Projects() {
 
   const grand = useMemo(() => {
     const monthly = periods.map((_, i) => groups.reduce((s, g) => s + (g.subMonthly[i] ?? 0), 0));
-    const total = groups.reduce((s, g) => s + g.subTotal, 0);
+    const rawTotal = groups.reduce((s, g) => s + g.subRawTotal, 0);
+    const weightedTotal = groups.reduce(
+      (s, g) => s + g.rows.reduce((ss, r) => ss + r.rawTotal * r.prob, 0),
+      0,
+    );
     const count = groups.reduce((s, g) => s + g.rows.length, 0);
-    return { monthly, total, count };
+    return { monthly, rawTotal, weightedTotal, count };
   }, [groups, periods]);
+  const grandTotal = demandMode === "weighted" ? grand.weightedTotal : grand.rawTotal;
 
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -223,7 +245,7 @@ export default function Projects() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl font-semibold">Projects</h1>
-          <p className="text-sm text-fg-muted">Projects, opportunities, and ambitions — FTE demand aggregated from staffing for full year {year}. Click a row to see assigned people and ARVE.</p>
+          <p className="text-sm text-fg-muted">Projects, opportunities, and ambitions — FTE demand aggregated from staffing for full year {year}. Click a row to see assigned people and ARVE. Opportunities and ambitions are weighted by commit probability.</p>
         </div>
         <button className="btn-primary flex items-center gap-1.5" onClick={openNew}>
           <Plus className="w-4 h-4" /> New project
@@ -300,6 +322,23 @@ export default function Projects() {
           <option value="billable">Billable</option>
           <option value="status">Status</option>
         </select>
+        <label className="text-xs text-fg-muted ml-1">Demand</label>
+        <div className="inline-flex items-center gap-1">
+          {(["weighted", "raw"] as const).map((m) => (
+            <button
+              key={m}
+              className={demandMode === m ? "pill-brand" : "chip"}
+              onClick={() => setDemandMode(m)}
+              title={
+                m === "weighted"
+                  ? "FTE × commit probability (opportunity × 0.5, ambition × 0.3)"
+                  : "Raw FTE demand, ignoring commit probability"
+              }
+            >
+              {m === "weighted" ? "Weighted" : "Raw"}
+            </button>
+          ))}
+        </div>
         <span className="text-xs text-fg-muted ml-auto">
           {grand.count} / {projects.length} projects
           {hasFilter && (
@@ -394,7 +433,7 @@ export default function Projects() {
                       <td className="table-td"></td>
                     </tr>
                   )}
-                  {!isCollapsed && grp.rows.map(({ p, monthly, total }) => {
+                  {!isCollapsed && grp.rows.map(({ p, monthly, total, prob }) => {
                     const KindIcon = KIND_ICON[p.kind];
                     return (
                     <tr key={p.projectNumber} className="hover:bg-bg-hover group">
@@ -409,6 +448,14 @@ export default function Projects() {
                       </td>
                       <td className="table-td">
                         <span className={KIND_CLASS[p.kind]}>{KIND_LABEL[p.kind]}</span>
+                        {p.kind !== "project" && (
+                          <span
+                            className="chip ml-1 tabular-nums"
+                            title={`Commit probability ${prob.toFixed(2)}`}
+                          >
+                            × {prob.toFixed(2)}
+                          </span>
+                        )}
                       </td>
                       <td className="table-td">{muLabel(p.marketUnit)}</td>
                       <td className="table-td">{p.customer}</td>
@@ -471,6 +518,9 @@ export default function Projects() {
               <tr className="bg-bg-muted font-semibold border-t-2 border-border">
                 <td className="table-td sticky left-0 bg-bg-muted z-10" colSpan={6}>
                   Grand total <span className="chip ml-1">{grand.count}</span>
+                  <span className="ml-2 text-[11px] font-normal text-fg-muted">
+                    {formatNumber(grand.weightedTotal, 1)} FTE weighted ({formatNumber(grand.rawTotal, 1)} raw)
+                  </span>
                 </td>
                 {periods.map((p, i) => (
                   <td
@@ -484,7 +534,7 @@ export default function Projects() {
                   </td>
                 ))}
                 <td className="table-td text-right tabular-nums">
-                  {grand.total > 0 ? formatNumber(grand.total, 1) : <span className="text-fg-subtle">—</span>}
+                  {grandTotal > 0 ? formatNumber(grandTotal, 1) : <span className="text-fg-subtle">—</span>}
                 </td>
                 <td className="table-td"></td>
               </tr>

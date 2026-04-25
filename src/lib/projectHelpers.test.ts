@@ -1,15 +1,32 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_COMMIT_PROBABILITY,
   aggregateProjects,
   assignmentsByEmployee,
   buildArveLookup,
   employeeMap,
   employeeProjectsForPeriod,
+  getCommitProbability,
   projectKey,
   trailingArve,
+  weightedDemand,
   yearPeriods,
 } from "./projectHelpers";
-import type { Employee, EmployeeMonthSnapshot, GfsHours, WorkingCalendarEntry } from "../types";
+import type { Employee, EmployeeMonthSnapshot, GfsHours, Project, WorkingCalendarEntry } from "../types";
+
+function proj(overrides: Partial<Project> = {}): Project {
+  return {
+    projectNumber: "PRJ-1",
+    name: "Test",
+    customer: "Acme",
+    marketUnit: "MU1",
+    kind: "project",
+    isBillable: true,
+    status: "active",
+    tags: [],
+    ...overrides,
+  };
+}
 
 function emp(overrides: Partial<Employee> = {}): Employee {
   return {
@@ -171,5 +188,121 @@ describe("projectHelpers / employeeMap", () => {
     const m = employeeMap([emp({ localNumber: "P001" }), emp({ localNumber: "P002" })]);
     expect(m.size).toBe(2);
     expect(m.get("P001")?.localNumber).toBe("P001");
+  });
+});
+
+describe("projectHelpers / getCommitProbability (I30)", () => {
+  it("returns 1.0 for kind=project regardless of stored value", () => {
+    expect(getCommitProbability(proj({ kind: "project" }))).toBe(1.0);
+    // Even a stored value is ignored for kind=project.
+    expect(getCommitProbability(proj({ kind: "project", commitProbability: 0.5 }))).toBe(1.0);
+  });
+
+  it("returns kind default when commitProbability is unset for opportunity/ambition", () => {
+    expect(getCommitProbability(proj({ kind: "opportunity" }))).toBe(DEFAULT_COMMIT_PROBABILITY.opportunity);
+    expect(getCommitProbability(proj({ kind: "ambition" }))).toBe(DEFAULT_COMMIT_PROBABILITY.ambition);
+  });
+
+  it("returns stored commitProbability for opportunity/ambition when set", () => {
+    expect(getCommitProbability(proj({ kind: "opportunity", commitProbability: 0.8 }))).toBe(0.8);
+    expect(getCommitProbability(proj({ kind: "ambition", commitProbability: 0.1 }))).toBe(0.1);
+  });
+});
+
+describe("projectHelpers / weightedDemand", () => {
+  it("multiplies FTE demand by the project's commit probability", () => {
+    expect(weightedDemand(100, proj({ kind: "project" }))).toBe(100);
+    expect(weightedDemand(100, proj({ kind: "opportunity" }))).toBeCloseTo(50, 5);
+    expect(weightedDemand(100, proj({ kind: "ambition" }))).toBeCloseTo(30, 5);
+    expect(weightedDemand(10, proj({ kind: "opportunity", commitProbability: 0.75 }))).toBeCloseTo(7.5, 5);
+  });
+});
+
+/**
+ * Roll-up coverage — mirrors the Cockpit / Projects.tsx / MarketUnit / Bench
+ * aggregation pipeline that the feature-developer could not verify in-browser.
+ * These tests lock in the `Σ fteDemand × getCommitProbability(project)` contract
+ * so a future refactor of a page cannot silently change totals.
+ */
+describe("projectHelpers / demand roll-up (I30)", () => {
+  it("Cockpit-style weighted sum for a single period mixes kinds by probability", () => {
+    // Same shape as Cockpit.tsx: project-indexed lookup, then Σ weightedDemand.
+    const projects: Project[] = [
+      proj({ projectNumber: "PRJ-COMMIT", kind: "project" }),
+      proj({ projectNumber: "PRJ-OPP", kind: "opportunity" }),
+      proj({ projectNumber: "PRJ-AMB", kind: "ambition" }),
+    ];
+    const projectByNumber = new Map(projects.map((p) => [p.projectNumber, p] as const));
+    const demand = [
+      { projectNumber: "PRJ-COMMIT", period: "2026-05", fteDemand: 10 },
+      { projectNumber: "PRJ-OPP", period: "2026-05", fteDemand: 8 },
+      { projectNumber: "PRJ-AMB", period: "2026-05", fteDemand: 5 },
+    ];
+
+    const demandByPeriod = new Map<string, number>();
+    for (const d of demand) {
+      const p = projectByNumber.get(d.projectNumber);
+      if (!p) continue;
+      demandByPeriod.set(d.period, (demandByPeriod.get(d.period) ?? 0) + weightedDemand(d.fteDemand, p));
+    }
+
+    // 10*1.0 + 8*0.5 + 5*0.3 = 15.5
+    expect(demandByPeriod.get("2026-05")).toBeCloseTo(15.5, 5);
+  });
+
+  it("custom commitProbability on an opportunity overrides the 0.5 default in the weighted sum", () => {
+    const p = proj({ projectNumber: "PRJ-HOT", kind: "opportunity", commitProbability: 0.8 });
+    // 10 * 0.8 = 8.0 — NOT 10 * 0.5 = 5.0.
+    expect(weightedDemand(10, p)).toBeCloseTo(8.0, 5);
+    expect(weightedDemand(10, p)).not.toBeCloseTo(5.0, 5);
+  });
+
+  it("ignores a stored commitProbability on kind=project (guard against bad persisted state)", () => {
+    // Hypothetical bad state — a persisted project row with a leftover
+    // opportunity-era probability. getCommitProbability must clamp to 1.0.
+    const bad = proj({ projectNumber: "PRJ-BAD", kind: "project", commitProbability: 0.5 });
+    expect(getCommitProbability(bad)).toBe(1.0);
+    expect(weightedDemand(10, bad)).toBe(10);
+  });
+
+  it("Projects.tsx Raw vs Weighted: Raw = Σ fteDemand; Weighted = Σ fteDemand × getCommitProbability(project)", () => {
+    // Replicates the per-project row computation in Projects.tsx:
+    //   rawMonthly  = demand[]
+    //   weightedMonthly = rawMonthly.map(v => v * getCommitProbability(p))
+    //   rawTotal = Σ rawMonthly
+    //   weightedTotal = Σ weightedMonthly
+    // then grand totals = Σ over projects.
+    const projects: Project[] = [
+      proj({ projectNumber: "PRJ-C", kind: "project" }), // prob = 1.0
+      proj({ projectNumber: "PRJ-O", kind: "opportunity" }), // prob = 0.5
+      proj({ projectNumber: "PRJ-A", kind: "ambition", commitProbability: 0.2 }),
+    ];
+    const demandByProject: Record<string, number[]> = {
+      "PRJ-C": [4, 4, 4], // Σ = 12
+      "PRJ-O": [2, 2, 4], // Σ = 8
+      "PRJ-A": [10, 0, 0], // Σ = 10
+    };
+
+    let rawGrand = 0;
+    let weightedGrand = 0;
+    for (const p of projects) {
+      const raw = demandByProject[p.projectNumber] ?? [];
+      const prob = getCommitProbability(p);
+      const rawTotal = raw.reduce((s, v) => s + v, 0);
+      const weightedTotal = raw.reduce((s, v) => s + v * prob, 0);
+      rawGrand += rawTotal;
+      weightedGrand += weightedTotal;
+    }
+
+    // Raw = 12 + 8 + 10 = 30
+    expect(rawGrand).toBe(30);
+    // Weighted = 12*1.0 + 8*0.5 + 10*0.2 = 12 + 4 + 2 = 18
+    expect(weightedGrand).toBeCloseTo(18, 5);
+    // Parallel check using weightedDemand directly — must match manual math.
+    const viaHelper = projects.reduce(
+      (s, p) => s + (demandByProject[p.projectNumber] ?? []).reduce((ss, v) => ss + weightedDemand(v, p), 0),
+      0,
+    );
+    expect(viaHelper).toBeCloseTo(weightedGrand, 5);
   });
 });

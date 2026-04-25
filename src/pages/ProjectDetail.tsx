@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAppStore } from "../store";
-import { aggregateProjects, yearPeriods, employeeMap } from "../lib/projectHelpers";
+import { aggregateProjects, getCommitProbability, yearPeriods, employeeMap } from "../lib/projectHelpers";
 import { hoursForPeriod, indexWorkingCalendar } from "../lib/workingCalendar";
 import { cn, formatNumber, formatPct, activeCycleYear } from "../lib/utils";
 import { ArrowLeft, ArrowDown, ArrowUp, Briefcase, Building2, ChevronDown, ChevronRight, Users, UserPlus, Pencil } from "lucide-react";
@@ -24,6 +24,7 @@ export default function ProjectDetail() {
 
   const unassign = useAppStore((s) => s.unassignEmployeeFromProject);
   const assign = useAppStore((s) => s.assignEmployeeToProject);
+  const updateProject = useAppStore((s) => s.updateProject);
   const project = projects.find((p) => p.projectNumber === projectNumber);
   const activePeriod = cycles.find((c) => c.id === activeCycleId)?.periodOpened;
   const year = activeCycleYear(cycles, activeCycleId);
@@ -54,9 +55,13 @@ export default function ProjectDetail() {
   const [sortKey, setSortKey] = useState<"name" | "pu" | "grade" | "total" | "months" | `m${number}`>("total");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [probabilityDraft, setProbabilityDraft] = useState<string>("");
   useEffect(() => {
     if (editingCell) inputRef.current?.focus();
   }, [editingCell]);
+  useEffect(() => {
+    if (project) setProbabilityDraft(getCommitProbability(project).toFixed(2));
+  }, [project]);
 
   const beginEdit = (localNumber: string, period: string, hours: number) => {
     setEditingCell({ localNumber, period });
@@ -320,6 +325,41 @@ export default function ProjectDetail() {
             >
               {project.kind}
             </span>
+            {project.kind === "project" ? (
+              <span className="chip tabular-nums" title="Committed — commit probability fixed at 1.00">
+                × 1.00 (committed)
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 chip tabular-nums" title="Commit probability — weight applied to FTE demand. Blur to save.">
+                <span>×</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  className="w-14 text-right bg-transparent outline-none border-b border-border focus:border-brand"
+                  value={probabilityDraft}
+                  onChange={(e) => setProbabilityDraft(e.target.value)}
+                  onBlur={() => {
+                    const n = Number(probabilityDraft.replace(",", "."));
+                    if (!Number.isFinite(n)) {
+                      setProbabilityDraft(getCommitProbability(project).toFixed(2));
+                      return;
+                    }
+                    if (n !== getCommitProbability(project)) {
+                      updateProject(project.projectNumber, { commitProbability: n });
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+                    else if (e.key === "Escape") {
+                      setProbabilityDraft(getCommitProbability(project).toFixed(2));
+                      (e.currentTarget as HTMLInputElement).blur();
+                    }
+                  }}
+                />
+              </span>
+            )}
             <span className={project.isBillable ? "pill-success" : "chip"}>
               {project.isBillable ? "billable" : "overhead"}
             </span>

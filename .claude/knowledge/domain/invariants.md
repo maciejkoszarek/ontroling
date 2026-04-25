@@ -88,3 +88,9 @@ stale or guessed PU violate I25.
 | I27 | Every forecast mutation appends exactly one `AuditEntry` with action `create` or `update` |
 | I28 | Every cycle transition appends one `AuditEntry` with the matching action |
 | I29 | Every `workingCalendar` mutation (edit or reset) appends one `AuditEntry` with `entityType: "working_calendar"` |
+
+## Demand weighting
+
+| ID | Invariant | Enforcement |
+| --- | --- | --- |
+| I30 | `Project.commitProbability ∈ [0, 1]`; kind `project` is always `1.0` | **Clamped on write** in `updateProject` (out-of-range input appends a `"validation-clamp"` audit entry with `{ entity: "project", field: "commitProbability", reason: "I30 range" }`). `addProject` clamps and applies kind-defaults: `project → 1.0`, `opportunity → 0.5`, `ambition → 0.3`. Resolve effective probability via `getCommitProbability(p)` — it forces `1.0` for `project` regardless of a stored value. `updateProject` resets `commitProbability` to the new kind's default whenever `kind` changes. |

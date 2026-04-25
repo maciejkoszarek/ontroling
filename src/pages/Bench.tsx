@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useAppStore } from "../store";
 import { puLabel, DEMO_ANCHOR_PERIOD } from "../lib/demoData";
 import { formatPct, formatNumber, periodAdd } from "../lib/utils";
+import { weightedDemand } from "../lib/projectHelpers";
 import { Sparkles } from "lucide-react";
 
 export default function Bench() {
@@ -44,7 +45,7 @@ export default function Bench() {
     return projects
       .map((p) => {
         const projDemand = projectDemand.filter((d) => d.projectNumber === p.projectNumber && d.period >= DEMO_ANCHOR_PERIOD).slice(0, 6);
-        const avgDemand = projDemand.reduce((a, d) => a + d.fteDemand, 0) / Math.max(1, projDemand.length);
+        const avgDemand = projDemand.reduce((a, d) => a + weightedDemand(d.fteDemand, p), 0) / Math.max(1, projDemand.length);
         const tagHits = (p.tags ?? []).filter((t) => empSkills.has(t.toLowerCase())).length;
         const nameHits = selectedEmp.e.skills.filter((s) => p.name.toLowerCase().includes(s.toLowerCase())).length;
         const score = (tagHits + nameHits) * 10 + avgDemand * 0.5;

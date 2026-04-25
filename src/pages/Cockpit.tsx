@@ -9,6 +9,7 @@ import { useAppStore } from "../store";
 import { leafPuCodes, rollingPeriods, DEMO_ANCHOR_PERIOD as demoAnchorPeriod, puLabel } from "../lib/demoData";
 import { useForecastIndex } from "../hooks/useForecastIndex";
 import { weightedMean } from "../lib/forecast";
+import { weightedDemand } from "../lib/projectHelpers";
 import { formatDelta, formatNumber, formatPct, periodLabel } from "../lib/utils";
 
 export default function Cockpit() {
@@ -17,6 +18,8 @@ export default function Cockpit() {
   const cycles = useAppStore((s) => s.cycles);
   const anomalies = useAppStore((s) => s.anomalies);
   const joiners = useAppStore((s) => s.joiners);
+  const projects = useAppStore((s) => s.projects);
+  const projectDemand = useAppStore((s) => s.projectDemand);
 
   const cycle = cycles.find((c) => c.id === activeCycleId);
   const period = cycle?.periodOpened ?? demoAnchorPeriod;
@@ -32,11 +35,19 @@ export default function Cockpit() {
         leafPuCodes.map((pu) => idx.get(cycleId, pu, "FTE", p)),
       );
 
+    const projectByNumber = new Map(projects.map((p) => [p.projectNumber, p] as const));
+    const demandByPeriod = new Map<string, number>();
+    for (const d of projectDemand) {
+      const proj = projectByNumber.get(d.projectNumber);
+      if (!proj) continue;
+      demandByPeriod.set(d.period, (demandByPeriod.get(d.period) ?? 0) + weightedDemand(d.fteDemand, proj));
+    }
+
     const hcSeries = rollingPeriods.map((p) => sumAll("HC_END", activeCycleId, p));
     const fteSeries = rollingPeriods.map((p) => sumAll("FTE", activeCycleId, p));
     const bfteSeries = rollingPeriods.map((p) => sumAll("BFTE", activeCycleId, p));
     const arveSeries = rollingPeriods.map((p) => weightedArve(activeCycleId, p) * 100);
-    const demandSeries = bfteSeries.map((v) => v * 1.08); // mock demand line
+    const demandSeries = rollingPeriods.map((p) => demandByPeriod.get(p) ?? 0);
 
     const leaderboard = leafPuCodes
       .map((pu) => {
@@ -63,7 +74,7 @@ export default function Cockpit() {
       demandSeries,
       leaderboard,
     };
-  }, [idx, activeCycleId, previousCycleId, period]);
+  }, [idx, activeCycleId, previousCycleId, period, projects, projectDemand]);
 
   const sumAll = (metric: ForecastMetric, cycleId: string, p: string) =>
     leafPuCodes.reduce((a, pu) => a + idx.get(cycleId, pu, metric, p), 0);

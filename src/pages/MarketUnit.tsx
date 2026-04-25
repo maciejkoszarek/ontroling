@@ -4,6 +4,7 @@ import { useAppStore } from "../store";
 import { rollingPeriods, DEMO_ANCHOR_PERIOD } from "../lib/demoData";
 import Heatmap from "../components/Heatmap";
 import { formatNumber, periodLabel } from "../lib/utils";
+import { weightedDemand } from "../lib/projectHelpers";
 
 type Metric = "fte" | "bfte" | "coverage";
 
@@ -22,7 +23,7 @@ export default function MarketUnit() {
       const proj = projects.find((p) => p.projectNumber === d.projectNumber);
       if (!proj) continue;
       const k = `${proj.marketUnit}::${d.period}`;
-      map.set(k, (map.get(k) ?? 0) + d.fteDemand);
+      map.set(k, (map.get(k) ?? 0) + weightedDemand(d.fteDemand, proj));
     }
     return map;
   }, [projectDemand, projects]);
@@ -101,17 +102,18 @@ export default function MarketUnit() {
             <ul className="mt-1 space-y-1.5">
               {projectDemand
                 .filter((d) => d.period === selectedMonth)
-                .sort((a, b) => b.fteDemand - a.fteDemand)
-                .slice(0, 6)
                 .map((d) => {
                   const proj = projects.find((p) => p.projectNumber === d.projectNumber);
-                  return (
-                    <li key={d.projectNumber} className="flex items-center justify-between text-sm">
-                      <span className="truncate mr-2">{proj?.name ?? d.projectNumber}</span>
-                      <span className="chip">{formatNumber(d.fteDemand, 1)} FTE</span>
-                    </li>
-                  );
-                })}
+                  return { d, proj, weighted: proj ? weightedDemand(d.fteDemand, proj) : d.fteDemand };
+                })
+                .sort((a, b) => b.weighted - a.weighted)
+                .slice(0, 6)
+                .map(({ d, proj, weighted }) => (
+                  <li key={d.projectNumber} className="flex items-center justify-between text-sm">
+                    <span className="truncate mr-2">{proj?.name ?? d.projectNumber}</span>
+                    <span className="chip">{formatNumber(weighted, 1)} FTE</span>
+                  </li>
+                ))}
             </ul>
           </div>
         </aside>

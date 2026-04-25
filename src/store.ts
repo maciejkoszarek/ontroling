@@ -33,7 +33,8 @@ import type {
 } from "./types";
 import * as demo from "./lib/demoData";
 import { checkArithmeticIdentities, validateForecastCell } from "./lib/forecast";
-import { uid } from "./lib/utils";
+import { DEFAULT_COMMIT_PROBABILITY } from "./lib/projectHelpers";
+import { clamp, uid } from "./lib/utils";
 import { defaultEntryForPeriod, seedWorkingCalendar } from "./lib/workingCalendar";
 
 export interface AppState {
@@ -661,18 +662,23 @@ export const useAppStore = create<AppState>()(
         if (!trimmedNumber) return;
         if (get().projects.some((x) => x.projectNumber === trimmedNumber)) return;
         const now = new Date().toISOString();
+        const kind = p.kind ?? "project";
+        const commitProbability = kind === "project"
+          ? 1.0
+          : clamp(p.commitProbability ?? DEFAULT_COMMIT_PROBABILITY[kind], 0, 1);
         const project: Project = {
           projectNumber: trimmedNumber,
           name: p.name.trim(),
           customer: p.customer.trim(),
           marketUnit: p.marketUnit,
-          kind: p.kind ?? "project",
+          kind,
           isBillable: p.isBillable,
           status: p.status,
           startDate: p.startDate,
           endDate: p.endDate,
           description: p.description?.trim() || undefined,
           tags: p.tags ?? [],
+          commitProbability,
         };
         const audit: AuditEntry = {
           id: uid("au-"),
@@ -689,29 +695,66 @@ export const useAppStore = create<AppState>()(
       updateProject: (projectNumber, patch) => {
         const before = get().projects.find((p) => p.projectNumber === projectNumber);
         if (!before) return;
+        const now = new Date().toISOString();
+        const actor = get().user.name;
+        const audits: AuditEntry[] = [];
+
+        const kindChanging = patch.kind !== undefined && patch.kind !== before.kind;
+        const nextKind = patch.kind ?? before.kind;
+
+        let nextCommit: number;
+        if (kindChanging) {
+          nextCommit = nextKind === "project" ? 1.0 : DEFAULT_COMMIT_PROBABILITY[nextKind];
+        } else if (patch.commitProbability !== undefined) {
+          if (nextKind === "project") {
+            nextCommit = 1.0;
+          } else {
+            const raw = patch.commitProbability;
+            const clamped = Number.isFinite(raw) ? clamp(raw, 0, 1) : 0;
+            if (!Number.isFinite(raw) || raw < 0 || raw > 1) {
+              audits.push({
+                id: uid("au-"),
+                actor,
+                entityType: "validation-clamp",
+                entityId: projectNumber,
+                action: "update",
+                before: { entity: "project", field: "commitProbability", value: raw },
+                after: { entity: "project", field: "commitProbability", value: clamped, reason: "I30 range" },
+                ts: now,
+              });
+            }
+            nextCommit = clamped;
+          }
+        } else {
+          nextCommit = before.commitProbability ?? DEFAULT_COMMIT_PROBABILITY[nextKind];
+          if (nextKind === "project") nextCommit = 1.0;
+        }
+
         const after: Project = {
           ...before,
           ...patch,
+          kind: nextKind,
           name: patch.name !== undefined ? patch.name.trim() : before.name,
           customer: patch.customer !== undefined ? patch.customer.trim() : before.customer,
           description:
             patch.description !== undefined
               ? patch.description.trim() || undefined
               : before.description,
+          commitProbability: nextCommit,
         };
-        const audit: AuditEntry = {
+        audits.unshift({
           id: uid("au-"),
-          actor: get().user.name,
+          actor,
           entityType: "project",
           entityId: projectNumber,
           action: "update",
           before,
           after,
-          ts: new Date().toISOString(),
-        };
+          ts: now,
+        });
         set({
           projects: get().projects.map((p) => (p.projectNumber === projectNumber ? after : p)),
-          audit: [audit, ...get().audit].slice(0, 2000),
+          audit: [...audits, ...get().audit].slice(0, 2000),
         });
       },
 

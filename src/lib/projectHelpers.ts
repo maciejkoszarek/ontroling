@@ -1,5 +1,31 @@
-import type { Employee, EmployeeMonthSnapshot, GfsHours, Period, WorkingCalendarEntry } from "../types";
+import type { Employee, EmployeeMonthSnapshot, GfsHours, Period, Project, ProjectKind, WorkingCalendarEntry } from "../types";
 import { hoursForPeriod, indexWorkingCalendar } from "./workingCalendar";
+
+/**
+ * Default commit probability per project kind. `project` is always committed
+ * (1.0); `opportunity` / `ambition` are editable pipeline estimates. I30.
+ */
+export const DEFAULT_COMMIT_PROBABILITY: Record<ProjectKind, number> = {
+  project: 1.0,
+  opportunity: 0.5,
+  ambition: 0.3,
+};
+
+/**
+ * Resolve the effective commit probability for a project. Kind `project` is
+ * always 1.0 regardless of a stored value (committed engagements). For
+ * `opportunity` / `ambition`, a stored value wins; otherwise fall back to the
+ * kind default. I30.
+ */
+export function getCommitProbability(p: Project): number {
+  if (p.kind === "project") return 1.0;
+  return p.commitProbability ?? DEFAULT_COMMIT_PROBABILITY[p.kind];
+}
+
+/** Weighted FTE demand: `fteDemand × getCommitProbability(p)`. */
+export function weightedDemand(fteDemand: number, p: Project): number {
+  return fteDemand * getCommitProbability(p);
+}
 
 export interface ProjectMonthAgg {
   projectNumber: string;
