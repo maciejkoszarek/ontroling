@@ -9,8 +9,8 @@ import type {
   GfsHours,
   Joiner,
   Leaver,
-  Period,
 } from "../types";
+import { asPeriod, asDate, str, num, inferPuCode, inferLocCode } from "./parseUtils";
 
 export interface ParseResult {
   employees: Employee[];
@@ -30,49 +30,6 @@ export interface ParseReport {
   fileSize: number;
 }
 
-function asPeriod(v: unknown): Period | null {
-  if (v === null || v === undefined) return null;
-  if (typeof v === "number") {
-    // Excel serial date
-    const d = XLSX.SSF.parse_date_code(v);
-    if (!d) return null;
-    return `${d.y}-${String(d.m).padStart(2, "0")}`;
-  }
-  const s = String(v).trim();
-  const m = /^(\d{4})-(\d{1,2})/.exec(s);
-  if (m) return `${m[1]}-${m[2].padStart(2, "0")}`;
-  const m2 = /^(\d{1,2})[./-](\d{4})$/.exec(s);
-  if (m2) return `${m2[2]}-${m2[1].padStart(2, "0")}`;
-  const d = new Date(s);
-  if (Number.isFinite(d.getTime())) {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  }
-  return null;
-}
-
-function asDate(v: unknown): string | null {
-  if (v === null || v === undefined || v === "") return null;
-  if (typeof v === "number") {
-    const d = XLSX.SSF.parse_date_code(v);
-    if (!d) return null;
-    return `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`;
-  }
-  const s = String(v).trim();
-  const d = new Date(s);
-  if (Number.isFinite(d.getTime())) return d.toISOString().slice(0, 10);
-  return null;
-}
-
-function str(v: unknown): string {
-  return v === null || v === undefined ? "" : String(v).trim();
-}
-
-function num(v: unknown): number {
-  if (v === null || v === undefined || v === "") return 0;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-}
-
 function pickSheet(wb: XLSX.WorkBook, candidates: string[]): { name: string; rows: Record<string, unknown>[] } | null {
   for (const name of wb.SheetNames) {
     if (candidates.some((c) => name.toLowerCase().includes(c.toLowerCase()))) {
@@ -82,31 +39,6 @@ function pickSheet(wb: XLSX.WorkBook, candidates: string[]): { name: string; row
     }
   }
   return null;
-}
-
-function inferPuCode(engagement: string): string {
-  const s = engagement.toUpperCase();
-  if (s.includes("SE1") || s.includes("PL01NC03")) return "PL01NC03";
-  if (s.includes("SE2") || s.includes("PL01NC04")) return "PL01NC04";
-  if (s.includes("SE3") || s.includes("PL01NC05")) return "PL01NC05";
-  if (s.includes("SE4") || s.includes("PL01NC06")) return "PL01NC06";
-  if (s.includes("SE5") || s.includes("PL01NC07")) return "PL01NC07";
-  if (s.includes("CLOUD") || s.includes("PL01NC08")) return "PL01NC08";
-  if (s.includes("COMPLEX")) return "PL01NC09";
-  if (s.includes("EEC") || s.includes("PL01NC10")) return "PL01NC10";
-  if (s.includes("HEAD")) return "PL01NC01";
-  return "PL01NC01";
-}
-
-function inferLocCode(loc: string): string {
-  const s = loc.toUpperCase();
-  if (s.includes("WROCŁ") || s.includes("WROC")) return "WRO";
-  if (s.includes("POZN")) return "POZ";
-  if (s.includes("GDAŃ") || s.includes("GDAN")) return "GDN";
-  if (s.includes("WARS")) return "WAW";
-  if (s.includes("KRAK") || s.includes("CRAC")) return "KRK";
-  if (s.includes("REMOTE")) return "REMOTE";
-  return "REMOTE";
 }
 
 export async function parseWorkbook(file: File): Promise<ParseReport> {

@@ -92,6 +92,33 @@ export interface Employee {
   capabilities?: string[]; // Capability ids
   germanSpeaker?: boolean;
   clearanceLevel?: ClearanceLevel;
+
+  // Optional fields populated from HR Database import (see hr_database_import.md §8).
+  // All optional so existing data still typechecks.
+  email?: string;
+  sex?: "M" | "F" | "Other";
+  hrFileNumber?: string;
+  contractEndDate?: string | null;
+  releaseDate?: string | null;
+  practice?: string;
+  pnlUnit?: string;
+  qualification?: string;
+  jobNameModel?: string;
+  positionPl?: string;
+  positionEn?: string;
+  contractManagerName?: string;
+  contractManagerLocalNumber?: string;
+  contractManagerEmail?: string;
+  directSupervisorName?: string;
+  directSupervisorLocalNumber?: string;
+  directSupervisorEmail?: string;
+  workExperience?: string;
+  currentEmployeeType?: string;
+  separationsFlag?: string;
+  org1Name?: string;
+  org1Code?: string;
+  org2Name?: string;
+  org3Code?: string;
 }
 
 export interface EmployeeMonthSnapshot {
@@ -213,6 +240,8 @@ export interface Leaver {
   endDate: string;
   reason: "voluntary" | "involuntary" | "contract_end" | "other";
   engagement: string;
+  /** HR file column 15: "The method of contract termination" (§8). */
+  terminationMethod?: string;
 }
 
 export interface ContractOfMandate {
@@ -296,6 +325,79 @@ export interface AuditEntry {
   after?: unknown;
   ts: string;
   requestId?: string;
+  /** Categorises the audit entry for the per-person change-history view (see hr_database_import.md §14). */
+  kind?:
+    | "hr_import"
+    | "user_edit"
+    | "transfer"
+    | "joiner"
+    | "leaver"
+    | "capability_change"
+    | "mapping_change";
+  /** Back-reference to `HrImport.id` when `kind === "hr_import"`. */
+  importId?: string;
+}
+
+export interface HrMappingEntry {
+  id: string;
+  kind: "production_unit" | "people_unit" | "location" | "grade";
+  source: string; // raw value from HR file (case- and whitespace-insensitive match)
+  targetCode: string; // PU/location/grade code in app
+  note?: string;
+  createdAt: string;
+  createdBy: string;
+  active: boolean;
+}
+
+export interface HrImportWarning {
+  code: "R01" | "R02" | "R03" | "R04" | "R05" | "R07" | "R08" | "R09" | "R10";
+  localNumber: string;
+  message: string;
+}
+
+export interface HrImportRowDecision {
+  importId: string;
+  localNumber: string;
+  diffKind:
+    | "new-employee"
+    | "changed"
+    | "unchanged"
+    | "re-hire"
+    | "terminating"
+    | "missing-from-file"
+    | "skipped";
+  fieldDiffs: Array<{ field: string; before: unknown; after: unknown }>;
+  decidedBy: string;
+  decidedAt: string;
+  action: "accept" | "edit-accept" | "skip";
+  edits?: Record<string, unknown>;
+}
+
+export interface HrImport {
+  id: string;
+  fileName: string;
+  fileMonth: Period; // YYYY-MM
+  reportGeneratedAt?: string;
+  importedAt: string;
+  importedBy: string;
+  durationMs: number;
+  counts: {
+    rowsRead: number;
+    rowsSkipped: number;
+    rowsRejected: number;
+    warnings: number;
+    new: number;
+    changed: number;
+    unchanged: number;
+    leavers: number;
+    joiners: number;
+    rehires: number;
+    transfers: number;
+    missingFromFile: number;
+  };
+  warnings: HrImportWarning[];
+  rowDecisions: HrImportRowDecision[];
+  stalenessOverrideReason?: string;
 }
 
 export interface Anomaly {

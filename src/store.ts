@@ -17,6 +17,10 @@ import type {
   ForecastMetric,
   GfsHours,
   Grade,
+  HrImport,
+  HrImportRowDecision,
+  HrImportWarning,
+  HrMappingEntry,
   Joiner,
   Leaver,
   Location,
@@ -33,9 +37,11 @@ import type {
 } from "./types";
 import * as demo from "./lib/demoData";
 import { checkArithmeticIdentities, validateForecastCell } from "./lib/forecast";
+import { inferPuCode } from "./lib/parseUtils";
 import { DEFAULT_COMMIT_PROBABILITY } from "./lib/projectHelpers";
 import { clamp, uid } from "./lib/utils";
 import { defaultEntryForPeriod, seedWorkingCalendar } from "./lib/workingCalendar";
+import type { HrImportPreview, HrEmployeeDiff } from "./lib/hrImportDiff";
 
 export interface AppState {
   // ----- reference
@@ -72,6 +78,11 @@ export interface AppState {
   audit: AuditEntry[];
   anomalies: Anomaly[];
   dqChecks: DQCheckResult[];
+
+  // ----- HR import (see hr_database_import.md)
+  hrMappings: HrMappingEntry[];
+  hrImports: HrImport[];
+  lastHrImport?: { id: string; month: Period; importedAt: string; importedBy: string };
 
   // ----- configuration
   workingCalendar: WorkingCalendarEntry[];
@@ -187,6 +198,43 @@ export interface AppState {
    * untouched. Appends a single audit entry.
    */
   applyImportPatch: (patch: Partial<AppState>, source: string) => void;
+
+  // ----- HR import actions
+  addHrMapping: (entry: Omit<HrMappingEntry, "id" | "createdAt" | "createdBy" | "active">) => void;
+  updateHrMapping: (id: string, patch: Partial<HrMappingEntry>) => void;
+  removeHrMapping: (id: string) => void;
+  resolveHrMapping: (kind: HrMappingEntry["kind"], source: string) => string | undefined;
+  canImportHr: (role: Role) => boolean;
+  canOverrideStaleness: (role: Role) => boolean;
+  /**
+   * Build a `ResolvePuFn` closure over the current `hrMappings` and the
+   * `inferPuCode` heuristic fallback. The HR parser consumes this; the UI
+   * does not have to assemble it. See hr_database_import.md §11.4.
+   */
+  buildResolvePuFn: () => HrResolvePuFn;
+  /**
+   * Commit an HR import preview after the reviewer has decided on every
+   * non-rejected diff. Throws `Error("STALE_IMPORT")` when the file month is
+   * older than `lastHrImport.month` and no override reason was provided.
+   * See hr_database_import.md §7.3, §15, §18.4.
+   */
+  commitHrImport: (args: CommitHrImportArgs) => { id: string };
+}
+
+export type HrResolvePuFn = (rawValue: string) => {
+  code: string;
+  via: "mapping" | "heuristic" | "none";
+};
+
+export interface CommitHrImportArgs {
+  preview: HrImportPreview;
+  decisions: HrImportRowDecision[];
+  fileName: string;
+  fileSize: number;
+  durationMs: number;
+  reportGeneratedAt: string | null;
+  warnings: HrImportWarning[];
+  stalenessOverrideReason?: string;
 }
 
 /**
@@ -197,6 +245,9 @@ export interface AppState {
  * and give up silently rather than crash the app.
  */
 const AUDIT_TRIM_LIMIT = 200;
+const STORAGE_KEY = "cca-practiceview-v3";
+const LEGACY_STORAGE_KEY = "cca-practiceview-v2";
+
 function quotaSafeStorage(): Storage {
   if (typeof localStorage === "undefined") {
     return {
@@ -214,7 +265,29 @@ function quotaSafeStorage(): Storage {
       return base.length;
     },
     clear: () => base.clear(),
-    getItem: (k) => base.getItem(k),
+    getItem: (k) => {
+      const direct = base.getItem(k);
+      if (direct !== null) return direct;
+      // First boot under v3: pick up a stale v2 envelope so users don't lose
+      // their persisted state when the schema bumps. We re-wrap it as a v3
+      // envelope (after migration) and remove the legacy key so we never
+      // double-read on subsequent boots.
+      if (k === STORAGE_KEY) {
+        try {
+          const legacy = base.getItem(LEGACY_STORAGE_KEY);
+          if (!legacy) return null;
+          const envelope = JSON.parse(legacy) as { state?: unknown; version?: number };
+          if (!envelope || typeof envelope !== "object" || !envelope.state) return null;
+          const migrated = migratePersistedState(envelope.state, envelope.version ?? 2);
+          base.removeItem(LEGACY_STORAGE_KEY);
+          return JSON.stringify({ state: migrated, version: 3 });
+        } catch (err) {
+          console.warn("[store] failed to migrate legacy v2 state; falling back to seed", err);
+          return null;
+        }
+      }
+      return null;
+    },
     key: (i) => base.key(i),
     removeItem: (k) => base.removeItem(k),
     setItem: (k, v) => {
@@ -272,6 +345,570 @@ function buildInitialLockedSnapshots(): Record<string, ForecastCell[]> {
   return snapshots;
 }
 
+/**
+ * Persistence migration from older `cca-practiceview-vN` schemas to the
+ * current `version: 3`. Exported so tests can exercise it directly without
+ * round-tripping through `localStorage`.
+ */
+export function migratePersistedState(
+  persisted: unknown,
+  version: number,
+): AppState {
+  if (!persisted || typeof persisted !== "object") return persisted as AppState;
+  const s = persisted as Record<string, unknown>;
+  if (version < 2) {
+    if (!Array.isArray(s.workingCalendar) || (s.workingCalendar as unknown[]).length === 0) {
+      s.workingCalendar = seedWorkingCalendar(2024, 2028);
+    }
+    if (Array.isArray(s.projects)) {
+      s.projects = (s.projects as Record<string, unknown>[]).map((p) => ({
+        ...p,
+        kind: (p.kind as string | undefined) ?? "project",
+      }));
+    }
+  }
+  if (version < 3) {
+    if (!Array.isArray(s.hrMappings)) s.hrMappings = [];
+    if (!Array.isArray(s.hrImports)) s.hrImports = [];
+  }
+  return s as unknown as AppState;
+}
+
+/**
+ * On first boot under `cca-practiceview-v3`, look for an existing v2 envelope
+ * left behind by an earlier release. If found, run it through
+ * `migratePersistedState` and remove the legacy key. Returns `null` when no
+ * legacy state exists or the read fails — the caller falls back to the
+ * normal initialState seed in that case. See hr_database_import.md §18.3.
+ */
+export function migrateFromLegacyLocalStorage(): Partial<AppState> | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (!raw) return null;
+    const envelope = JSON.parse(raw) as { state?: unknown; version?: number };
+    if (!envelope || typeof envelope !== "object" || !envelope.state) return null;
+    const migrated = migratePersistedState(envelope.state, envelope.version ?? 2);
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    return migrated as unknown as Partial<AppState>;
+  } catch (err) {
+    console.warn("[store] failed to migrate legacy v2 state; falling back to seed", err);
+    return null;
+  }
+}
+
+/**
+ * Seed identity HrMappingEntry rows for every non-virtual PU. Each PU gets up
+ * to three rows: one each for `code`, `shortName`, `displayName`, all
+ * targeting the PU's own `code`. This covers the ~80% well-formed file case
+ * out of the box (hr_database_import.md §11.5).
+ */
+export function seedHrMappings(units: ProductionUnit[]): HrMappingEntry[] {
+  const out: HrMappingEntry[] = [];
+  const now = new Date().toISOString();
+  for (const pu of units) {
+    if (pu.isVirtual) continue;
+    const sources = new Set([pu.code, pu.shortName, pu.displayName].filter(Boolean));
+    for (const source of sources) {
+      out.push({
+        id: uid("hrm-"),
+        kind: "production_unit",
+        source,
+        targetCode: pu.code,
+        createdAt: now,
+        createdBy: "system",
+        active: true,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * The set of `Employee` fields that the HR Database file is authoritative for.
+ * Used by `commitHrImport` to merge file values onto an existing employee
+ * while preserving user-managed fields (`capabilities`, `germanSpeaker`,
+ * `clearanceLevel`, `ggid`, `skills`). Mirrors `HR_MAPPED_FIELDS` in
+ * `hrImportDiff.ts`. See hr_database_import.md §7.3.
+ */
+const HR_MERGE_FIELDS: Array<keyof Employee> = [
+  "firstName",
+  "lastName",
+  "displayName",
+  "puCode",
+  "gradeCode",
+  "jobFunction",
+  "locationCode",
+  "startDate",
+  "endDate",
+  "fteCapacity",
+  "engagement",
+  "email",
+  "sex",
+  "hrFileNumber",
+  "contractEndDate",
+  "releaseDate",
+  "practice",
+  "pnlUnit",
+  "qualification",
+  "jobNameModel",
+  "positionPl",
+  "positionEn",
+  "contractManagerName",
+  "contractManagerLocalNumber",
+  "contractManagerEmail",
+  "directSupervisorName",
+  "directSupervisorLocalNumber",
+  "directSupervisorEmail",
+  "workExperience",
+  "currentEmployeeType",
+  "separationsFlag",
+  "org1Name",
+  "org1Code",
+  "org2Name",
+  "org3Code",
+];
+
+/**
+ * Merge a parsed HR row's mapped fields onto an existing `Employee`, applying
+ * any `decision.edits` overrides on top. Preserves user-managed fields (see
+ * `NEVER_DIFF_FIELDS` in `hrImportDiff.ts`). Returns the new employee object.
+ */
+function mergeEmployeeFromRow(
+  current: Employee,
+  parsed: Partial<Employee>,
+  edits?: Record<string, unknown>,
+): Employee {
+  const next: Employee = { ...current };
+  for (const key of HR_MERGE_FIELDS) {
+    const v = parsed[key];
+    if (v === undefined || v === "" || v === null) continue;
+    (next as unknown as Record<string, unknown>)[key as string] = v as unknown;
+  }
+  if (edits) {
+    for (const [k, v] of Object.entries(edits)) {
+      if (v === undefined) continue;
+      (next as unknown as Record<string, unknown>)[k] = v;
+    }
+  }
+  // Re-derive displayName when not explicitly edited and the parser has both
+  // first/last names — keeps existing behaviour from `addEmployee`.
+  if (!edits || edits.displayName === undefined) {
+    const fn = (next.firstName ?? "").trim();
+    const ln = (next.lastName ?? "").trim();
+    if (fn || ln) next.displayName = `${fn} ${ln}`.trim();
+  }
+  return next;
+}
+
+/**
+ * Build a brand-new `Employee` from a parsed HR row + optional edits.
+ * Defaults for fields the parser doesn't cover (`engagement`, `skills`,
+ * `fteCapacity`) match the existing `addEmployee` action.
+ */
+function newEmployeeFromRow(
+  localNumber: string,
+  parsed: Partial<Employee>,
+  edits?: Record<string, unknown>,
+): Employee {
+  const fn = (parsed.firstName ?? "").trim();
+  const ln = (parsed.lastName ?? "").trim();
+  const seed: Employee = {
+    localNumber,
+    firstName: fn,
+    lastName: ln,
+    displayName: parsed.displayName?.trim() || `${fn} ${ln}`.trim(),
+    puCode: parsed.puCode ?? "",
+    gradeCode: parsed.gradeCode ?? "",
+    jobFunction: parsed.jobFunction ?? "CSS",
+    locationCode: parsed.locationCode ?? "",
+    startDate: parsed.startDate ?? "",
+    endDate: parsed.endDate ?? null,
+    fteCapacity: parsed.fteCapacity ?? 1,
+    engagement: parsed.engagement ?? "",
+    skills: [],
+  };
+  for (const key of HR_MERGE_FIELDS) {
+    if (key in seed) continue;
+    const v = parsed[key];
+    if (v === undefined || v === "" || v === null) continue;
+    (seed as unknown as Record<string, unknown>)[key as string] = v as unknown;
+  }
+  if (edits) {
+    for (const [k, v] of Object.entries(edits)) {
+      if (v === undefined) continue;
+      (seed as unknown as Record<string, unknown>)[k] = v;
+    }
+  }
+  return seed;
+}
+
+interface PerEmployeeAuditPlan {
+  diff: HrEmployeeDiff;
+  decision: HrImportRowDecision;
+  before: Partial<Employee> | undefined;
+  after: Partial<Employee>;
+  action: "create" | "update";
+}
+
+function buildAuditSubset(emp: Employee, fields: Array<keyof Employee>): Partial<Employee> {
+  const out: Partial<Employee> = {};
+  for (const f of fields) {
+    if (emp[f] !== undefined) (out as unknown as Record<string, unknown>)[f as string] = emp[f] as unknown;
+  }
+  return out;
+}
+
+/**
+ * Implementation of `commitHrImport`. Lives outside the store factory so the
+ * action body inside `create()` stays a one-liner. See hr_database_import.md
+ * §7.3 (writes), §15 (audit fan-out), §18.4.
+ */
+function commitHrImportImpl(
+  get: () => AppState,
+  set: (patch: Partial<AppState>) => void,
+  args: CommitHrImportArgs,
+): { id: string } {
+  const state = get();
+
+  // Permission gate (§3) — store is authoritative even if the UI hides the
+  // upload control. Throws so the UI can surface a user-readable message.
+  if (!state.canImportHr(state.role)) {
+    throw new Error("FORBIDDEN_HR_IMPORT");
+  }
+
+  const {
+    preview,
+    decisions,
+    fileName,
+    fileSize,
+    durationMs,
+    reportGeneratedAt,
+    warnings,
+    stalenessOverrideReason,
+  } = args;
+
+  // Staleness guard (F08) — store is authoritative even if UI pre-checks.
+  if (
+    state.lastHrImport &&
+    preview.fileMonth < state.lastHrImport.month &&
+    !stalenessOverrideReason
+  ) {
+    throw new Error("STALE_IMPORT");
+  }
+
+  const importId = uid("hri-");
+  const now = new Date().toISOString();
+  const actor = state.user.email || state.user.name || "system";
+
+  const decisionByLocal = new Map<string, HrImportRowDecision>();
+  for (const d of decisions) decisionByLocal.set(d.localNumber, d);
+
+  // Snapshots are keyed by (localNumber, fileMonth); replace any existing one.
+  const snapshotKey = (ln: string, p: string) => `${ln}::${p}`;
+  const snapshotIndex = new Map<string, number>();
+  const snapshotsNext: EmployeeMonthSnapshot[] = [...state.snapshots];
+  for (let i = 0; i < snapshotsNext.length; i++) {
+    snapshotIndex.set(
+      snapshotKey(snapshotsNext[i].employeeLocalNumber, snapshotsNext[i].period),
+      i,
+    );
+  }
+
+  const employeesNext: Employee[] = [...state.employees];
+  const employeeIdx = new Map<string, number>();
+  for (let i = 0; i < employeesNext.length; i++) {
+    employeeIdx.set(employeesNext[i].localNumber, i);
+  }
+
+  const joinersNext: Joiner[] = [...state.joiners];
+  const leaversNext: Leaver[] = [...state.leavers];
+
+  const counts = {
+    rowsRead: preview.counts.rowsRead,
+    rowsSkipped: 0,
+    rowsRejected: preview.counts.rowsRejected,
+    warnings: warnings.length,
+    new: 0,
+    changed: 0,
+    unchanged: 0,
+    leavers: 0,
+    joiners: 0,
+    rehires: 0,
+    transfers: 0,
+    missingFromFile: preview.counts.missingFromFile,
+  };
+
+  const auditPlans: PerEmployeeAuditPlan[] = [];
+
+  for (const diff of preview.diffs) {
+    if (diff.diffKind === "missing-from-file") continue; // informational only
+
+    const decision = decisionByLocal.get(diff.localNumber);
+    if (!decision) continue;
+    if (decision.action === "skip") {
+      counts.rowsSkipped += 1;
+      continue;
+    }
+
+    const parsed = diff.parsedRow?.employee;
+    const fileMonth = preview.fileMonth;
+
+    if (diff.diffKind === "new-employee" && parsed) {
+      const created = newEmployeeFromRow(diff.localNumber, parsed, decision.edits);
+      employeesNext.push(created);
+      employeeIdx.set(created.localNumber, employeesNext.length - 1);
+      counts.new += 1;
+      // Narrow the audit payload to the fields the diff identified as touched
+      // (PII like `email`/`sex` is omitted unless it actually carried a value).
+      const touchedNew = diff.fieldDiffs.map((d) => d.field);
+      auditPlans.push({
+        diff,
+        decision,
+        before: undefined,
+        after: buildAuditSubset(created, touchedNew),
+        action: "create",
+      });
+      // Snapshot
+      writeSnapshot(snapshotsNext, snapshotIndex, created, fileMonth, true, false);
+      // Joiner — trust the parser's `willCreateJoiner` flag (Hired YES/NO ||
+      // Joiner?). Don't override it just because the start date sits in the
+      // file month: the parser already considered that.
+      if (diff.willCreateJoiner) {
+        joinersNext.push({
+          id: `j-hr-${importId}-${diff.localNumber}`,
+          employeeLocalNumber: created.localNumber,
+          firstName: created.firstName,
+          lastName: created.lastName,
+          puCode: created.puCode,
+          gradeCode: created.gradeCode,
+          locationCode: created.locationCode,
+          role: created.jobFunction === "CSS" ? "CSS" : created.jobFunction,
+          startDate: created.startDate,
+          source: "HR",
+          status: "actual",
+        });
+        counts.joiners += 1;
+      }
+      continue;
+    }
+
+    if (diff.diffKind === "changed" && parsed && diff.currentEmployee) {
+      const before = diff.currentEmployee;
+      const merged = mergeEmployeeFromRow(before, parsed, decision.edits);
+      const idx = employeeIdx.get(diff.localNumber);
+      if (idx !== undefined) employeesNext[idx] = merged;
+      counts.changed += 1;
+      const touched = diff.fieldDiffs.map((d) => d.field);
+      auditPlans.push({
+        diff,
+        decision,
+        before: buildAuditSubset(before, touched),
+        after: buildAuditSubset(merged, touched),
+        action: "update",
+      });
+      if (touched.includes("puCode") && before.puCode !== merged.puCode) {
+        counts.transfers += 1;
+      }
+      writeSnapshot(snapshotsNext, snapshotIndex, merged, fileMonth, false, false);
+      continue;
+    }
+
+    if (diff.diffKind === "re-hire" && parsed && diff.currentEmployee) {
+      const before = diff.currentEmployee;
+      const fileStart = parsed.startDate;
+      const merged = mergeEmployeeFromRow(before, parsed, decision.edits);
+      // Clear endDate (rehired) and apply new startDate when file provided one.
+      merged.endDate = null;
+      if (fileStart && (decision.edits?.startDate === undefined)) {
+        merged.startDate = fileStart;
+      }
+      const idx = employeeIdx.get(diff.localNumber);
+      if (idx !== undefined) employeesNext[idx] = merged;
+      counts.rehires += 1;
+      counts.changed += 1;
+      const touched = Array.from(
+        new Set([...diff.fieldDiffs.map((d) => d.field), "endDate" as keyof Employee, "startDate" as keyof Employee]),
+      );
+      auditPlans.push({
+        diff,
+        decision,
+        before: buildAuditSubset(before, touched),
+        after: buildAuditSubset(merged, touched),
+        action: "update",
+      });
+      joinersNext.push({
+        id: `j-hr-${importId}-${diff.localNumber}`,
+        employeeLocalNumber: merged.localNumber,
+        firstName: merged.firstName,
+        lastName: merged.lastName,
+        puCode: merged.puCode,
+        gradeCode: merged.gradeCode,
+        locationCode: merged.locationCode,
+        role: merged.jobFunction === "CSS" ? "CSS" : merged.jobFunction,
+        startDate: merged.startDate,
+        source: "HR",
+        status: "actual",
+      });
+      counts.joiners += 1;
+      writeSnapshot(snapshotsNext, snapshotIndex, merged, fileMonth, true, false);
+      continue;
+    }
+
+    if (diff.diffKind === "terminating" && parsed && diff.currentEmployee) {
+      const before = diff.currentEmployee;
+      const merged = mergeEmployeeFromRow(before, parsed, decision.edits);
+      const term = diff.parsedRow?.dateOfTermination ?? null;
+      if (term) merged.endDate = term;
+      const idx = employeeIdx.get(diff.localNumber);
+      if (idx !== undefined) employeesNext[idx] = merged;
+      counts.leavers += 1;
+      counts.changed += 1;
+      const touched = Array.from(
+        new Set([...diff.fieldDiffs.map((d) => d.field), "endDate" as keyof Employee]),
+      );
+      auditPlans.push({
+        diff,
+        decision,
+        before: buildAuditSubset(before, touched),
+        after: buildAuditSubset(merged, touched),
+        action: "update",
+      });
+      const editedTerminationMethod = decision.edits?.terminationMethod as
+        | string
+        | undefined;
+      const terminationMethod =
+        editedTerminationMethod ??
+        diff.parsedRow?.parsedTerminationMethod ??
+        undefined;
+      leaversNext.push({
+        id: `l-hr-${importId}-${diff.localNumber}`,
+        employeeLocalNumber: merged.localNumber,
+        firstName: merged.firstName,
+        lastName: merged.lastName,
+        puCode: merged.puCode,
+        gradeCode: merged.gradeCode,
+        startDate: merged.startDate,
+        endDate: term ?? merged.endDate ?? "",
+        reason: "voluntary",
+        engagement: before.engagement,
+        terminationMethod,
+      });
+      writeSnapshot(snapshotsNext, snapshotIndex, merged, fileMonth, false, true);
+      continue;
+    }
+
+    if (diff.diffKind === "unchanged" && diff.currentEmployee) {
+      counts.unchanged += 1;
+      writeSnapshot(snapshotsNext, snapshotIndex, diff.currentEmployee, fileMonth, false, false);
+      continue;
+    }
+  }
+
+  // Audit fan-out.
+  const audits: AuditEntry[] = [];
+  // Per-employee entries, newest-first within the import (file-order).
+  for (const plan of auditPlans) {
+    audits.push({
+      id: uid("audit-"),
+      actor,
+      entityType: "employee",
+      entityId: plan.diff.localNumber,
+      action: plan.action,
+      kind: "hr_import",
+      before: plan.before,
+      after: plan.after,
+      ts: now,
+      importId,
+    });
+  }
+  // Umbrella entry — pushed last so it lands ABOVE per-employee entries when
+  // we prepend the array (newest-first ordering).
+  audits.push({
+    id: uid("audit-"),
+    actor,
+    entityType: "import",
+    entityId: importId,
+    action: "create",
+    kind: "hr_import",
+    after: {
+      fileName,
+      fileMonth: preview.fileMonth,
+      counts,
+      stalenessOverrideReason,
+    },
+    ts: now,
+    importId,
+  });
+
+  const hrImport: HrImport = {
+    id: importId,
+    fileName,
+    fileMonth: preview.fileMonth,
+    reportGeneratedAt: reportGeneratedAt ?? undefined,
+    importedAt: now,
+    importedBy: actor,
+    durationMs,
+    counts,
+    warnings,
+    // Re-stamp importId on every persisted decision so they back-reference the
+    // umbrella record (§18.2). The walker hard-codes a "pending" placeholder.
+    rowDecisions: decisions.map((d) => ({ ...d, importId })),
+    stalenessOverrideReason,
+  };
+  void fileSize; // currently not persisted; reserved for §13 file panel.
+
+  set({
+    employees: employeesNext,
+    snapshots: snapshotsNext,
+    joiners: joinersNext,
+    leavers: leaversNext,
+    hrImports: [hrImport, ...state.hrImports],
+    lastHrImport: {
+      id: importId,
+      month: preview.fileMonth,
+      importedAt: now,
+      importedBy: actor,
+    },
+    audit: [...audits.reverse(), ...state.audit].slice(0, 2000),
+  });
+
+  return { id: importId };
+}
+
+function writeSnapshot(
+  snapshots: EmployeeMonthSnapshot[],
+  index: Map<string, number>,
+  emp: Employee,
+  fileMonth: string,
+  isJoiner: boolean,
+  isLeaver: boolean,
+) {
+  const key = `${emp.localNumber}::${fileMonth}`;
+  const snap: EmployeeMonthSnapshot = {
+    employeeLocalNumber: emp.localNumber,
+    period: fileMonth,
+    puCode: emp.puCode,
+    gradeCode: emp.gradeCode,
+    fteAssigned: emp.fteCapacity ?? 1,
+    bfte: 0,
+    arve: 0,
+    projectHours: 0,
+    vacationHours: 0,
+    learningHours: 0,
+    managementHours: 0,
+    isJoiner,
+    isLeaver,
+    isMover: false,
+  };
+  const idx = index.get(key);
+  if (idx !== undefined) snapshots[idx] = snap;
+  else {
+    snapshots.push(snap);
+    index.set(key, snapshots.length - 1);
+  }
+}
+
 function initialState(): Omit<AppState, keyof {
   setActiveCycle: unknown;
   setFilter: unknown;
@@ -311,6 +948,14 @@ function initialState(): Omit<AppState, keyof {
   ingest: unknown;
   resetToDemo: unknown;
   applyImportPatch: unknown;
+  addHrMapping: unknown;
+  updateHrMapping: unknown;
+  removeHrMapping: unknown;
+  resolveHrMapping: unknown;
+  canImportHr: unknown;
+  canOverrideStaleness: unknown;
+  buildResolvePuFn: unknown;
+  commitHrImport: unknown;
 }> {
   return {
     productionUnits: demo.productionUnits,
@@ -342,6 +987,10 @@ function initialState(): Omit<AppState, keyof {
     audit: [],
     anomalies: demo.anomalies,
     dqChecks: demo.dqChecks,
+
+    hrMappings: seedHrMappings(demo.productionUnits),
+    hrImports: [],
+    lastHrImport: undefined,
 
     workingCalendar: seedWorkingCalendar(2024, 2028),
 
@@ -497,32 +1146,36 @@ export const useAppStore = create<AppState>()(
 
       addEmployee: (e) => {
         const now = new Date().toISOString();
+        const state = get();
         const employee: Employee = {
           ...e,
           displayName: e.displayName ?? `${e.firstName} ${e.lastName}`,
           skills: e.skills ?? [],
         };
         const audit: AuditEntry = {
-          id: uid("au-"),
-          actor: get().user.name,
+          id: uid("audit-"),
+          actor: state.user.email,
           entityType: "employee",
           entityId: employee.localNumber,
           action: "create",
+          kind: "user_edit",
           after: employee,
           ts: now,
         };
-        set({ employees: [employee, ...get().employees], audit: [audit, ...get().audit].slice(0, 2000) });
+        set({ employees: [employee, ...state.employees], audit: [audit, ...state.audit].slice(0, 2000) });
       },
 
       addJoiner: (j) => {
         const now = new Date().toISOString();
+        const state = get();
         const joiner: Joiner = { ...j, id: uid("j-") };
         const audit: AuditEntry = {
-          id: uid("au-"),
-          actor: get().user.name,
-          entityType: "joiner",
-          entityId: joiner.id,
+          id: uid("audit-"),
+          actor: state.user.email,
+          entityType: "employee",
+          entityId: joiner.employeeLocalNumber ?? joiner.id,
           action: "create",
+          kind: "joiner",
           after: joiner,
           ts: now,
         };
@@ -556,28 +1209,31 @@ export const useAppStore = create<AppState>()(
 
       addLeaver: (l) => {
         const now = new Date().toISOString();
+        const state = get();
         const leaver: Leaver = { ...l, id: uid("l-") };
-        const employees = get().employees.map((e) =>
+        const employees = state.employees.map((e) =>
           e.localNumber === leaver.employeeLocalNumber ? { ...e, endDate: leaver.endDate } : e,
         );
         const audit: AuditEntry = {
-          id: uid("au-"),
-          actor: get().user.name,
-          entityType: "leaver",
-          entityId: leaver.id,
+          id: uid("audit-"),
+          actor: state.user.email,
+          entityType: "employee",
+          entityId: leaver.employeeLocalNumber,
           action: "create",
+          kind: "leaver",
           after: leaver,
           ts: now,
         };
         set({
-          leavers: [leaver, ...get().leavers],
+          leavers: [leaver, ...state.leavers],
           employees,
-          audit: [audit, ...get().audit].slice(0, 2000),
+          audit: [audit, ...state.audit].slice(0, 2000),
         });
       },
 
       transferEmployee: ({ localNumber, toPuCode, effectivePeriod, reason }) => {
-        const emp = get().employees.find((e) => e.localNumber === localNumber);
+        const state = get();
+        const emp = state.employees.find((e) => e.localNumber === localNumber);
         if (!emp) return;
         if (emp.puCode === toPuCode) return;
         const now = new Date().toISOString();
@@ -588,26 +1244,27 @@ export const useAppStore = create<AppState>()(
           toPuCode,
           effectivePeriod,
           recordedAt: now,
-          recordedBy: get().user.name,
+          recordedBy: state.user.name,
           reason,
         };
-        const employees = get().employees.map((e) =>
+        const employees = state.employees.map((e) =>
           e.localNumber === localNumber ? { ...e, puCode: toPuCode } : e,
         );
         const audit: AuditEntry = {
-          id: uid("au-"),
-          actor: get().user.name,
+          id: uid("audit-"),
+          actor: state.user.email,
           entityType: "employee",
           entityId: localNumber,
           action: "update",
+          kind: "transfer",
           before: { puCode: emp.puCode },
           after: { puCode: toPuCode, effectivePeriod, reason },
           ts: now,
         };
         set({
-          transfers: [transfer, ...get().transfers],
+          transfers: [transfer, ...state.transfers],
           employees,
-          audit: [audit, ...get().audit].slice(0, 2000),
+          audit: [audit, ...state.audit].slice(0, 2000),
         });
       },
 
@@ -835,26 +1492,73 @@ export const useAppStore = create<AppState>()(
       },
 
       setEmployeeCapabilities: (localNumber, capabilityIds) => {
+        const state = get();
+        const emp = state.employees.find((e) => e.localNumber === localNumber);
+        if (!emp) return;
+        const before = emp.capabilities ?? [];
+        const after = [...capabilityIds];
+        const audit: AuditEntry = {
+          id: uid("audit-"),
+          actor: state.user.email,
+          entityType: "employee",
+          entityId: localNumber,
+          action: "update",
+          kind: "capability_change",
+          before,
+          after,
+          ts: new Date().toISOString(),
+        };
         set({
-          employees: get().employees.map((e) =>
-            e.localNumber === localNumber ? { ...e, capabilities: [...capabilityIds] } : e,
+          employees: state.employees.map((e) =>
+            e.localNumber === localNumber ? { ...e, capabilities: after } : e,
           ),
+          audit: [audit, ...state.audit].slice(0, 2000),
         });
       },
 
       setEmployeeGermanSpeaker: (localNumber, v) => {
+        const state = get();
+        const emp = state.employees.find((e) => e.localNumber === localNumber);
+        if (!emp) return;
+        const audit: AuditEntry = {
+          id: uid("audit-"),
+          actor: state.user.email,
+          entityType: "employee",
+          entityId: localNumber,
+          action: "update",
+          kind: "user_edit",
+          before: { germanSpeaker: emp.germanSpeaker },
+          after: { germanSpeaker: v },
+          ts: new Date().toISOString(),
+        };
         set({
-          employees: get().employees.map((e) =>
+          employees: state.employees.map((e) =>
             e.localNumber === localNumber ? { ...e, germanSpeaker: v } : e,
           ),
+          audit: [audit, ...state.audit].slice(0, 2000),
         });
       },
 
       setEmployeeClearanceLevel: (localNumber, v) => {
+        const state = get();
+        const emp = state.employees.find((e) => e.localNumber === localNumber);
+        if (!emp) return;
+        const audit: AuditEntry = {
+          id: uid("audit-"),
+          actor: state.user.email,
+          entityType: "employee",
+          entityId: localNumber,
+          action: "update",
+          kind: "user_edit",
+          before: { clearanceLevel: emp.clearanceLevel },
+          after: { clearanceLevel: v },
+          ts: new Date().toISOString(),
+        };
         set({
-          employees: get().employees.map((e) =>
+          employees: state.employees.map((e) =>
             e.localNumber === localNumber ? { ...e, clearanceLevel: v } : e,
           ),
+          audit: [audit, ...state.audit].slice(0, 2000),
         });
       },
 
@@ -1138,27 +1842,90 @@ export const useAppStore = create<AppState>()(
         };
         set({ ...(applied as Partial<AppState>), audit: [entry, ...state.audit].slice(0, 2000) });
       },
+
+      addHrMapping: (entry) => {
+        if (get().role !== "controller") return;
+        const state = get();
+        const source = entry.source.trim();
+        if (!source) return;
+        const normalized = source.toLowerCase();
+        const dup = state.hrMappings.some(
+          (m) => m.kind === entry.kind && m.source.trim().toLowerCase() === normalized && m.active,
+        );
+        if (dup) return;
+        const now = new Date().toISOString();
+        const created: HrMappingEntry = {
+          id: uid("hrm-"),
+          kind: entry.kind,
+          source,
+          targetCode: entry.targetCode,
+          note: entry.note,
+          createdAt: now,
+          createdBy: state.user.email || state.user.name || "system",
+          active: true,
+        };
+        set({ hrMappings: [...state.hrMappings, created] });
+      },
+
+      updateHrMapping: (id, patch) => {
+        if (get().role !== "controller") return;
+        const state = get();
+        if (!state.hrMappings.some((m) => m.id === id)) return;
+        set({
+          hrMappings: state.hrMappings.map((m) =>
+            m.id === id
+              ? {
+                  ...m,
+                  ...patch,
+                  id: m.id,
+                  createdAt: m.createdAt,
+                  createdBy: m.createdBy,
+                  source: patch.source !== undefined ? patch.source.trim() : m.source,
+                }
+              : m,
+          ),
+        });
+      },
+
+      removeHrMapping: (id) => {
+        if (get().role !== "controller") return;
+        set({ hrMappings: get().hrMappings.filter((m) => m.id !== id) });
+      },
+
+      resolveHrMapping: (kind, source) => {
+        const needle = source.trim().toLowerCase();
+        if (!needle) return undefined;
+        const hit = get().hrMappings.find(
+          (m) => m.active && m.kind === kind && m.source.trim().toLowerCase() === needle,
+        );
+        return hit?.targetCode;
+      },
+
+      canImportHr: (role) => role === "controller" || role === "hr",
+
+      canOverrideStaleness: (role) => role === "controller",
+
+      buildResolvePuFn: () => {
+        const mappings = get().hrMappings;
+        return (rawValue: string) => {
+          const needle = rawValue.trim().toLowerCase();
+          if (!needle) return { code: "", via: "none" as const };
+          const hit = mappings.find(
+            (m) => m.active && m.kind === "production_unit" && m.source.trim().toLowerCase() === needle,
+          );
+          if (hit) return { code: hit.targetCode, via: "mapping" as const };
+          const heuristic = inferPuCode(rawValue);
+          return { code: heuristic, via: "heuristic" as const };
+        };
+      },
+
+      commitHrImport: (args) => commitHrImportImpl(get, set, args),
     }),
     {
-      name: "cca-practiceview-v2",
-      version: 2,
+      name: STORAGE_KEY,
+      version: 3,
       storage: createJSONStorage(() => quotaSafeStorage()),
-      migrate: (persisted, version) => {
-        if (!persisted || typeof persisted !== "object") return persisted as AppState;
-        const s = persisted as Record<string, unknown>;
-        if (version < 2) {
-          if (!Array.isArray(s.workingCalendar) || (s.workingCalendar as unknown[]).length === 0) {
-            s.workingCalendar = seedWorkingCalendar(2024, 2028);
-          }
-          if (Array.isArray(s.projects)) {
-            s.projects = (s.projects as Record<string, unknown>[]).map((p) => ({
-              ...p,
-              kind: (p.kind as string | undefined) ?? "project",
-            }));
-          }
-        }
-        return s as unknown as AppState;
-      },
+      migrate: (persisted, version) => migratePersistedState(persisted, version),
       onRehydrateStorage: () => (state) => {
         if (!state) return;
         if (!Array.isArray(state.workingCalendar) || state.workingCalendar.length === 0) {
@@ -1167,6 +1934,10 @@ export const useAppStore = create<AppState>()(
         if (Array.isArray(state.projects)) {
           state.projects = state.projects.map((p) => ({ ...p, kind: p.kind ?? "project" }));
         }
+        if (!Array.isArray(state.hrMappings) || state.hrMappings.length === 0) {
+          state.hrMappings = seedHrMappings(state.productionUnits);
+        }
+        if (!Array.isArray(state.hrImports)) state.hrImports = [];
       },
       partialize: (s) => ({
         activeCycleId: s.activeCycleId,
@@ -1189,6 +1960,9 @@ export const useAppStore = create<AppState>()(
         capabilities: s.capabilities,
         projects: s.projects,
         workingCalendar: s.workingCalendar,
+        hrMappings: s.hrMappings,
+        hrImports: s.hrImports,
+        lastHrImport: s.lastHrImport,
       }),
     },
   ),
