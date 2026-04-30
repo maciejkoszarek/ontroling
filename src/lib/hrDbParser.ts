@@ -308,7 +308,12 @@ function parseRow(
   const leaverVal = r.get(row, "leaver");
   const hiredYes = isYes(hiredVal);
   const joinerQYes = isYes(joinerQVal);
-  const joinerYes = hiredYes || joinerQYes;
+  // `Hired YES/NO` in real HR exports means "currently employed" (a static
+  // status that's TAK for almost everyone), while `Joiner?` is the per-month
+  // event flag we actually care about. Trust `Joiner?` when present; only
+  // fall back to `Hired YES/NO` if the file doesn't include `Joiner?` at all.
+  const hasJoinerQColumn = ctx.resolver.byCanonical.has("joinerQ");
+  const joinerYes = hasJoinerQColumn ? joinerQYes : hiredYes;
   const leaverYes = isYes(leaverVal);
 
   const partTimeRaw = r.get(row, "partTime");
@@ -371,18 +376,24 @@ function parseRow(
     });
   }
 
-  // R05 — Joiner? disagrees with Hired YES/NO. Only when both are present.
+  // R05 — anomaly: Joiner=YES but employee is not currently employed.
+  // The original "they should always agree" rule was wrong: `Hired YES/NO`
+  // is a static employment status (TAK for nearly everyone) while `Joiner?`
+  // is the per-month event flag, so they legitimately differ on most rows.
+  // Only the inconsistent direction (joiner of someone marked NOT employed)
+  // is worth surfacing.
   const hiredHasValue = isYes(hiredVal) || isNo(hiredVal);
   const joinerHasValue = isYes(joinerQVal) || isNo(joinerQVal);
   if (
     hiredHasValue &&
     joinerHasValue &&
-    isYes(hiredVal) !== isYes(joinerQVal)
+    joinerQYes &&
+    !hiredYes
   ) {
     rowWarnings.push({
       code: "R05",
       localNumber,
-      message: `Hired YES/NO (${str(hiredVal)}) disagrees with Joiner? (${str(joinerQVal)}).`,
+      message: `Joiner? = YES but Hired YES/NO = ${str(hiredVal)} (employee not marked as currently employed).`,
     });
   }
 

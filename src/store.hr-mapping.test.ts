@@ -114,6 +114,16 @@ describe("store — HR mapping CRUD + resolution", () => {
     expect(resolveHrMapping("production_unit", "CCA Developers 2")).toBe("PL01NC04");
   });
 
+  it("resolveHrMapping treats `_` and whitespace as interchangeable", () => {
+    const { resolveHrMapping } = useAppStore.getState();
+    // Seed has `CCA_Complex_Transformation` (underscores). Real HR exports
+    // sometimes use `CCA_Complex Transformation` (one underscore + one space).
+    expect(resolveHrMapping("production_unit", "CCA_Complex_Transformation")).toBe("PL01NC09");
+    expect(resolveHrMapping("production_unit", "CCA_Complex Transformation")).toBe("PL01NC09");
+    expect(resolveHrMapping("production_unit", "CCA Complex Transformation")).toBe("PL01NC09");
+    expect(resolveHrMapping("production_unit", "cca complex_transformation")).toBe("PL01NC09");
+  });
+
   it("non-controller roles cannot add, update, or remove HR mappings", () => {
     const before = useAppStore.getState().hrMappings;
     const beforeIds = before.map((m) => m.id);

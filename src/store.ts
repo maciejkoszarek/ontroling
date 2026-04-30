@@ -398,6 +398,15 @@ export function migrateFromLegacyLocalStorage(): Partial<AppState> | null {
 }
 
 /**
+ * Normalize HR-mapping source strings so case, surrounding whitespace, and the
+ * underscore-vs-space difference don't break matching. Real exports often use
+ * `CCA_Complex_Transformation` and `CCA_Complex Transformation` interchangeably.
+ */
+export function normalizeHrSource(s: string): string {
+  return s.trim().toLowerCase().replace(/[\s_]+/g, " ");
+}
+
+/**
  * Seed identity HrMappingEntry rows for every non-virtual PU. Each PU gets up
  * to three rows: one each for `code`, `shortName`, `displayName`, all
  * targeting the PU's own `code`. This covers the ~80% well-formed file case
@@ -1848,9 +1857,9 @@ export const useAppStore = create<AppState>()(
         const state = get();
         const source = entry.source.trim();
         if (!source) return;
-        const normalized = source.toLowerCase();
+        const normalized = normalizeHrSource(source);
         const dup = state.hrMappings.some(
-          (m) => m.kind === entry.kind && m.source.trim().toLowerCase() === normalized && m.active,
+          (m) => m.kind === entry.kind && normalizeHrSource(m.source) === normalized && m.active,
         );
         if (dup) return;
         const now = new Date().toISOString();
@@ -1893,10 +1902,10 @@ export const useAppStore = create<AppState>()(
       },
 
       resolveHrMapping: (kind, source) => {
-        const needle = source.trim().toLowerCase();
+        const needle = normalizeHrSource(source);
         if (!needle) return undefined;
         const hit = get().hrMappings.find(
-          (m) => m.active && m.kind === kind && m.source.trim().toLowerCase() === needle,
+          (m) => m.active && m.kind === kind && normalizeHrSource(m.source) === needle,
         );
         return hit?.targetCode;
       },
@@ -1908,10 +1917,10 @@ export const useAppStore = create<AppState>()(
       buildResolvePuFn: () => {
         const mappings = get().hrMappings;
         return (rawValue: string) => {
-          const needle = rawValue.trim().toLowerCase();
+          const needle = normalizeHrSource(rawValue);
           if (!needle) return { code: "", via: "none" as const };
           const hit = mappings.find(
-            (m) => m.active && m.kind === "production_unit" && m.source.trim().toLowerCase() === needle,
+            (m) => m.active && m.kind === "production_unit" && normalizeHrSource(m.source) === needle,
           );
           if (hit) return { code: hit.targetCode, via: "mapping" as const };
           const heuristic = inferPuCode(rawValue);

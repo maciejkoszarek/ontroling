@@ -264,20 +264,38 @@ describe("parseHrDatabaseFile — row-level rules", () => {
     expect(result.rows[0].rowWarnings.find((w) => w.code === "R04")).toBeTruthy();
   });
 
-  it("R05: Hired=NO + Joiner?=YES surfaces a warning", async () => {
+  it("R05: anomaly — Joiner=YES but Hired=NO surfaces a warning", async () => {
     const r = buildRow({ "Hired YES/NO": "NO", "Joiner?": "YES" });
     const file = buildFile({ HR_DB: [FULL_HEADER, r] });
     const result = await parseHrDatabaseFile(file, stubResolvePu);
     expect(result.rows[0].rowWarnings.find((w) => w.code === "R05")).toBeTruthy();
-    // joinerYes is the OR of Hired and Joiner? — should still be true.
+    // Joiner? is trusted directly when present.
     expect(result.rows[0].joinerYes).toBe(true);
   });
 
-  it("does NOT raise R05 when both fields agree", async () => {
+  it("does NOT raise R05 when both fields are YES", async () => {
     const r = buildRow({ "Hired YES/NO": "YES", "Joiner?": "YES" });
     const file = buildFile({ HR_DB: [FULL_HEADER, r] });
     const result = await parseHrDatabaseFile(file, stubResolvePu);
     expect(result.rows[0].rowWarnings.find((w) => w.code === "R05")).toBeFalsy();
+  });
+
+  it("does NOT raise R05 in the common Hired=YES + Joiner?=NO case (existing employee)", async () => {
+    // This is the typical row in real exports: currently employed (TAK) but
+    // not a joiner THIS month (false). It used to spam R05 on ~99% of rows.
+    const r = buildRow({ "Hired YES/NO": "TAK", "Joiner?": false });
+    const file = buildFile({ HR_DB: [FULL_HEADER, r] });
+    const result = await parseHrDatabaseFile(file, stubResolvePu);
+    expect(result.rows[0].rowWarnings.find((w) => w.code === "R05")).toBeFalsy();
+    // joinerYes follows Joiner? alone.
+    expect(result.rows[0].joinerYes).toBe(false);
+  });
+
+  it("joinerYes follows Joiner? alone when both columns are present", async () => {
+    const r = buildRow({ "Hired YES/NO": "YES", "Joiner?": "NO" });
+    const file = buildFile({ HR_DB: [FULL_HEADER, r] });
+    const result = await parseHrDatabaseFile(file, stubResolvePu);
+    expect(result.rows[0].joinerYes).toBe(false);
   });
 
   it("accepts Polish TAK/NIE for Hired YES/NO and Joiner?", async () => {

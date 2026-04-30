@@ -184,8 +184,8 @@ the HR column land in the application's data model? Edit the *Target* and
 | 4 | `Last Name` | string | `Employee.lastName` | required | |
 | 5 | `First Name` | string | `Employee.firstName` | required | |
 | 6 | `Name` | string | `Employee.displayName` (fallback) | optional | If missing, derive as `firstName + " " + lastName`. |
-| 7 | `Hired YES/NO` | enum YES/NO | derives `Joiner` event | required | YES creates a `Joiner` for the file's month if not already present. |
-| 8 | `Joiner?` | enum YES/NO | derives `Joiner` event | optional | OR-ed with column 7. Discrepancy → warning. |
+| 7 | `Hired YES/NO` | enum YES/NO (TAK/NIE accepted) | informational; fallback only | required | Static employment status — TAK for every currently-employed person. **Does NOT drive joiner detection** unless column 8 is missing. |
+| 8 | `Joiner?` | enum YES/NO or boolean | derives `Joiner` event | optional but preferred | Per-month event flag. When present, this column alone decides if the row is a joiner. Falls back to column 7 only if `Joiner?` is absent from the file. |
 | 9 | `Leaver` | enum YES/NO | derives `Leaver` event | required | Combined with column 13 (`Date of termination`). |
 | 10 | `Location` | string | `Employee.locationCode` | required | Resolved via `inferLocCode()` (Wrocław → WRO, etc.). Unknown → warning. |
 | 11 | `Date of employment` | date | `Employee.startDate` | required | First-ever start date (not re-hire date). |
@@ -254,7 +254,7 @@ the HR column land in the application's data model? Edit the *Target* and
 | R02 | `Grade` is in `state.grades[].code` | warning |
 | R03 | `Location` resolves to a known location code | warning |
 | R04 | `Date of termination` (when present) ≥ `Date of employment` | warning |
-| R05 | `Joiner?` consistent with `Hired YES/NO` | warning |
+| R05 | Anomaly: `Joiner? = YES` but `Hired YES/NO = NO` (someone joined but isn't currently employed) | warning |
 | R06 | `Leaver = YES` ⇒ `Date of termination` is non-empty | error (row rejected) |
 | R07 | `People Unit == Production Unit` | warning |
 | R08 | `SBU` matches the resolved PU's SBU | warning |
