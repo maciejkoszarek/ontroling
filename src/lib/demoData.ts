@@ -860,9 +860,29 @@ export const muByCode: Map<string, MarketUnit> = new Map(marketUnits.map((m) => 
 export const locByCode: Map<string, Location> = new Map(locations.map((l) => [l.code, l]));
 export const projByNumber: Map<string, Project> = new Map(projects.map((p) => [p.projectNumber, p]));
 
+/**
+ * Live PU index — populated at runtime from the store so taxonomy entries
+ * added by an import (e.g. `replacePeopleAndPruneProjects`) flow through to
+ * label/display lookups across the app. Falls back to the static demo map
+ * built from `productionUnits` above.
+ */
+let livePuIndex: Map<string, ProductionUnit> | null = null;
+
+/**
+ * Replace the live PU index. Called from the store whenever `productionUnits`
+ * changes. Pure module-level state; reset on store rehydrate.
+ */
+export function setLivePuIndex(units: ReadonlyArray<ProductionUnit>): void {
+  livePuIndex = new Map(units.map((p) => [p.code, p]));
+}
+
+function resolvePu(code: string): ProductionUnit | undefined {
+  return livePuIndex?.get(code) ?? puByCode.get(code);
+}
+
 export function puLabel(code: string): string {
-  return puByCode.get(code)?.shortName ?? code;
+  return resolvePu(code)?.shortName ?? code;
 }
 export function puDisplay(code: string): string {
-  return puByCode.get(code)?.displayName ?? code;
+  return resolvePu(code)?.displayName ?? code;
 }

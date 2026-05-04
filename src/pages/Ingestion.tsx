@@ -1,16 +1,36 @@
 import { useRef, useState } from "react";
-import { CheckCircle2, FileSpreadsheet, Upload, AlertTriangle, Download } from "lucide-react";
+import { CheckCircle2, FileSpreadsheet, Upload, AlertTriangle, Download, Users } from "lucide-react";
 import { useAppStore } from "../store";
 import { parseWorkbook, exportWorkbook } from "../lib/excelParser";
+import { parsePeopleWorkbook } from "../lib/peopleImport";
 import { downloadBlob } from "../lib/utils";
+
+interface PeopleImportSummary {
+  fileName: string;
+  period: string | null;
+  employeesBefore: number;
+  employeesAfter: number;
+  gfsHoursBefore: number;
+  gfsHoursAfter: number;
+  projectsBefore: number;
+  projectsAfter: number;
+  removedProjectNumbers: string[];
+  warnings: string[];
+}
 
 export default function Ingestion() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const peopleInputRef = useRef<HTMLInputElement>(null);
   const ingest = useAppStore((s) => s.ingest);
+  const replacePeople = useAppStore((s) => s.replacePeopleAndPruneProjects);
+  const role = useAppStore((s) => s.role);
   const lastIngest = useAppStore((s) => s.lastIngest);
   const resetDemo = useAppStore((s) => s.resetToDemo);
   const [parsing, setParsing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [peopleParsing, setPeopleParsing] = useState(false);
+  const [peopleErr, setPeopleErr] = useState<string | null>(null);
+  const [peopleSummary, setPeopleSummary] = useState<PeopleImportSummary | null>(null);
 
   async function onFile(file: File) {
     setParsing(true);
@@ -28,6 +48,37 @@ export default function Ingestion() {
       setErr((e as Error).message || "Failed to parse workbook.");
     }
     setParsing(false);
+  }
+
+  async function onPeopleFile(file: File) {
+    setPeopleParsing(true);
+    setPeopleErr(null);
+    setPeopleSummary(null);
+    try {
+      const parsed = await parsePeopleWorkbook(file);
+      if (parsed.employees.length === 0) {
+        setPeopleErr("No employees found in the workbook — check the file format.");
+        setPeopleParsing(false);
+        return;
+      }
+      const result = replacePeople({
+        employees: parsed.employees,
+        snapshots: parsed.snapshots,
+        joiners: parsed.joiners,
+        leavers: parsed.leavers,
+        fileName: file.name,
+        puCodeToPeopleUnit: parsed.puCodeToPeopleUnit,
+      });
+      setPeopleSummary({
+        fileName: file.name,
+        period: parsed.period,
+        ...result,
+        warnings: parsed.warnings,
+      });
+    } catch (e) {
+      setPeopleErr((e as Error).message || "Failed to import people roster.");
+    }
+    setPeopleParsing(false);
   }
 
   function onExport() {
@@ -99,6 +150,105 @@ export default function Ingestion() {
       {err && (
         <div className="card p-4 border-danger/40 text-sm text-danger flex items-center gap-2">
           <AlertTriangle className="w-4 h-4" /> {err}
+        </div>
+      )}
+
+      <div className="card p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
+        <div className="space-y-2">
+          <h2 className="text-sm font-semibold flex items-center gap-2">
+            <Users className="w-4 h-4 text-brand" /> Replace people roster (CCA_People.xlsx)
+          </h2>
+          <p className="text-[13px] text-fg-muted">
+            Wipes the current employees, snapshots, joiners and leavers and rebuilds them from a
+            single-sheet CCA_People-style export. Project references are rebuilt by Employee Number:
+            <code> gfsHours</code> rows for missing employees are dropped, and any project that
+            ends up with zero references is removed.
+          </p>
+          <div className="flex items-center gap-2 mt-2">
+            <button
+              className="btn-primary"
+              onClick={() => peopleInputRef.current?.click()}
+              disabled={peopleParsing || role !== "controller"}
+              title={role !== "controller" ? "Controller role required" : undefined}
+            >
+              <Upload className="w-4 h-4" /> {peopleParsing ? "Importing…" : "Choose people file"}
+            </button>
+            <input
+              ref={peopleInputRef}
+              type="file"
+              accept=".xlsx"
+              className="hidden"
+              onChange={(e) => e.target.files?.[0] && onPeopleFile(e.target.files[0])}
+            />
+            {role !== "controller" && (
+              <span className="text-[11px] text-fg-muted">Switch to Controller role in Admin to enable.</span>
+            )}
+          </div>
+          {peopleErr && (
+            <div className="text-sm text-danger flex items-center gap-2 mt-2">
+              <AlertTriangle className="w-4 h-4" /> {peopleErr}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <h3 className="text-[12px] uppercase tracking-wider text-fg-muted">Expected columns</h3>
+          <ul className="text-[12px] text-fg-muted space-y-0.5">
+            <li>Month · Employee Number · First/Last Name</li>
+            <li>Production Unit · People Unit · Grade</li>
+            <li>Date of employment · Date of termination</li>
+            <li>Part time (FTE) · Location · Job type</li>
+            <li>Joiner? · Leaver</li>
+          </ul>
+        </div>
+      </div>
+
+      {peopleSummary && (
+        <div className="card p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <CheckCircle2 className="w-5 h-5 text-success" />
+            <h3 className="text-sm font-semibold">People roster imported</h3>
+            <span className="chip ml-auto">{peopleSummary.fileName}</span>
+          </div>
+          <dl className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-sm">
+            <div>
+              <dt className="text-[11px] text-fg-muted uppercase tracking-wider">Period</dt>
+              <dd className="font-medium">{peopleSummary.period ?? "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] text-fg-muted uppercase tracking-wider">Employees</dt>
+              <dd className="font-medium tabular-nums">
+                {peopleSummary.employeesBefore} → {peopleSummary.employeesAfter}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-[11px] text-fg-muted uppercase tracking-wider">GFS hours rows</dt>
+              <dd className="font-medium tabular-nums">
+                {peopleSummary.gfsHoursBefore} → {peopleSummary.gfsHoursAfter}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-[11px] text-fg-muted uppercase tracking-wider">Projects</dt>
+              <dd className="font-medium tabular-nums">
+                {peopleSummary.projectsBefore} → {peopleSummary.projectsAfter}
+                {peopleSummary.removedProjectNumbers.length > 0 && (
+                  <span className="text-fg-muted">
+                    {" "}
+                    (−{peopleSummary.removedProjectNumbers.length})
+                  </span>
+                )}
+              </dd>
+            </div>
+          </dl>
+          {peopleSummary.warnings.length > 0 && (
+            <ul className="mt-3 space-y-1 text-[13px]">
+              {peopleSummary.warnings.map((w, i) => (
+                <li key={i} className="flex items-center gap-1.5 text-warning">
+                  <AlertTriangle className="w-3.5 h-3.5" /> {w}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
