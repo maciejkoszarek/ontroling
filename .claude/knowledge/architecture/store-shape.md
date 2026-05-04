@@ -17,7 +17,9 @@ duplicate selectors without cutting re-renders.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `productionUnits` | `ProductionUnit[]` | 10 real + 2 virtual; `leafPuCodes` / `sePuCodes` derived |
-| `marketUnits` | `MarketUnit[]` | 9 MUs |
+| `sbus` | `Sbu[]` | top of MU hierarchy; CRUD via `addSbu` / `updateSbu` / `removeSbu` (delete blocked while child BUs exist) |
+| `bus` | `Bu[]` | references `sbuCode`; CRUD via `addBu` / `updateBu` / `removeBu` (delete blocked while child MUs exist) |
+| `marketUnits` | `MarketUnit[]` | references `buCode`; CRUD via `addMarketUnit` / `updateMarketUnit` / `removeMarketUnit` (delete blocked while projects reference it) |
 | `locations` | `Location[]` | 6 PL locations incl. REMOTE |
 | `grades` | `Grade[]` | 8 grades |
 | `projects` | `Project[]` | client + internal projects; CRUD via `addProject` / `updateProject` |
@@ -231,7 +233,9 @@ because it needs the raw-live cells for F↔F cross-cycle consolidation.
 rule: if a new field is not forward-compatible (or renames an existing one),
 bump the suffix. Additive fields (e.g. `workingCalendar`) are safe without a
 bump — Zustand shallow-merges on rehydrate and uses the initial seed for
-missing fields.
+missing fields. The `migrate` callback handles in-place upgrades from older
+versions; the v2→v3 migration synthesizes `sbus` and `bus` from any legacy
+`MarketUnit.sbu` strings and rewrites MUs to `{ buCode }`.
 
 ### v2 → v3 migration
 
@@ -266,14 +270,16 @@ in-memory) and is therefore the trim target; forecast cells, cycles, and
 reference data are bounded by domain cardinality.
 
 `partialize` at the bottom of [src/store.ts](src/store.ts) lists which
-fields are persisted. Reference data like PUs, MUs, grades, locations is
-**not** persisted — it always comes from `demoData.ts`. Persisted fields:
-preferences (`role`, `theme`, `density`, `filter`), `activeCycleId` /
-`previousCycleId`, `forecastCells`, `lockedSnapshots`, `cycles`, `comments`,
-`audit`, `scenarios`, `employees`, `joiners`, `leavers`, `transfers`,
-`gfsHours`, `capabilities`, `projects`, `workingCalendar`, `hrMappings`,
-`hrImports`, `lastHrImport`. Adding a new persisted slice requires updating
-both the seed in `initialState()` and the `partialize` list.
+fields are persisted. Most reference data (PUs, grades, locations) is
+**not** persisted — it always comes from `demoData.ts`. The org-hierarchy
+slices (`sbus`, `bus`, `marketUnits`) ARE persisted because they're
+admin-editable. Persisted fields: preferences (`role`, `theme`, `density`,
+`filter`), `activeCycleId` / `previousCycleId`, `forecastCells`,
+`lockedSnapshots`, `cycles`, `comments`, `audit`, `scenarios`, `employees`,
+`joiners`, `leavers`, `transfers`, `gfsHours`, `capabilities`, `projects`,
+`sbus`, `bus`, `marketUnits`, `workingCalendar`, `hrMappings`, `hrImports`,
+`lastHrImport`. Adding a new persisted slice requires updating both the
+seed in `initialState()` and the `partialize` list.
 
 ## Writing a new action
 

@@ -17,7 +17,9 @@ function fakeState(): AppState {
     productionUnits: [
       { code: "PU1", shortName: "X", displayName: "X unit", sbu: "SBU", bu: "BU", parentCode: null, sortOrder: 1, active: true },
     ],
-    marketUnits: [{ code: "MU1", displayName: "MU1", sbu: "SBU" }],
+    sbus: [{ code: "SBU", displayName: "SBU", sortOrder: 10 }],
+    bus: [{ code: "BU", displayName: "BU", sbuCode: "SBU", sortOrder: 10 }],
+    marketUnits: [{ code: "MU1", displayName: "MU1", buCode: "BU" }],
     locations: [],
     grades: [],
     projects: [

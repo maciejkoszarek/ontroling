@@ -17,10 +17,23 @@ export interface ProductionUnit {
   isVirtual?: boolean; // CCA_SE_total / CCA_Total
 }
 
+export interface Sbu {
+  code: string;
+  displayName: string;
+  sortOrder?: number;
+}
+
+export interface Bu {
+  code: string;
+  displayName: string;
+  sbuCode: string;
+  sortOrder?: number;
+}
+
 export interface MarketUnit {
   code: string;
   displayName: string;
-  sbu: string;
+  buCode: string;
 }
 
 export interface WorkingCalendarEntry {

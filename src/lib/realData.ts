@@ -4,22 +4,22 @@
 import type { Employee, GfsHours, MarketUnit, Project } from "../types";
 
 export const realMarketUnits: MarketUnit[] = [
-  { code: "AUTO", displayName: "AUTO", sbu: "GDC PL ABL" },
-  { code: "BAYER", displayName: "Bayer", sbu: "GDC PL ABL" },
-  { code: "CIS", displayName: "CIS", sbu: "GDC PL ABL" },
-  { code: "FS", displayName: "Financial Services", sbu: "GDC PL ABL" },
-  { code: "GDC", displayName: "GDC Overhead", sbu: "GDC PL ABL" },
-  { code: "IDC", displayName: "IDC Methods", sbu: "GDC PL ABL" },
-  { code: "MHT", displayName: "MHT", sbu: "GDC PL ABL" },
-  { code: "NORDICS", displayName: "Nordics", sbu: "GDC PL ABL" },
-  { code: "OTHER", displayName: "Other / Internal", sbu: "GDC PL ABL" },
-  { code: "OTHER_BU", displayName: "Other BU", sbu: "GDC PL ABL" },
-  { code: "PS", displayName: "Public Sector", sbu: "GDC PL ABL" },
-  { code: "PUBLIC", displayName: "Public", sbu: "GDC PL ABL" },
-  { code: "RED", displayName: "Retail/Logistics (RED)", sbu: "GDC PL ABL" },
-  { code: "UK", displayName: "UK", sbu: "GDC PL ABL" },
-  { code: "UNN", displayName: "UNN (Unified Nordics)", sbu: "GDC PL ABL" },
-  { code: "VW_GROUP", displayName: "VW Group", sbu: "GDC PL ABL" },
+  { code: "AUTO", displayName: "AUTO", buCode: "CCA" },
+  { code: "BAYER", displayName: "Bayer", buCode: "CCA" },
+  { code: "CIS", displayName: "CIS", buCode: "CCA" },
+  { code: "FS", displayName: "Financial Services", buCode: "CCA" },
+  { code: "GDC", displayName: "GDC Overhead", buCode: "CCA" },
+  { code: "IDC", displayName: "IDC Methods", buCode: "CCA" },
+  { code: "MHT", displayName: "MHT", buCode: "CCA" },
+  { code: "NORDICS", displayName: "Nordics", buCode: "CCA" },
+  { code: "OTHER", displayName: "Other / Internal", buCode: "CCA" },
+  { code: "OTHER_BU", displayName: "Other BU", buCode: "CCA" },
+  { code: "PS", displayName: "Public Sector", buCode: "CCA" },
+  { code: "PUBLIC", displayName: "Public", buCode: "CCA" },
+  { code: "RED", displayName: "Retail/Logistics (RED)", buCode: "CCA" },
+  { code: "UK", displayName: "UK", buCode: "CCA" },
+  { code: "UNN", displayName: "UNN (Unified Nordics)", buCode: "CCA" },
+  { code: "VW_GROUP", displayName: "VW Group", buCode: "CCA" },
 ];
 
 export const realProjects: Project[] = [
