@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAppStore } from "../store";
-import { ArrowLeft, ArrowRightLeft, Briefcase, ChevronLeft, ChevronRight, MapPin, Pencil, Plus, User, UserMinus, X } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, Briefcase, ChevronLeft, ChevronRight, MapPin, Pencil, Plus, TrendingUp, User, UserMinus, X } from "lucide-react";
 import { cn, formatPct, formatNumber, activeCycleYear } from "../lib/utils";
 import { puLabel, puDisplay, rollingPeriods, DEMO_ANCHOR_PERIOD } from "../lib/demoData";
 import { HOURS_PER_WORKING_DAY } from "../lib/workingDays";
 import { buildDaysByPeriod, buildHoursByPeriod } from "../lib/workingCalendar";
 import ReactECharts from "echarts-for-react";
-import { AddLeaverModal, AssignProjectModal, TransferModal } from "../components/forms/PeopleForms";
+import { AddLeaverModal, AssignProjectModal, EditPersonModal, PromoteModal, TransferModal } from "../components/forms/PeopleForms";
 import EmployeeChangeHistory from "../components/people/EmployeeChangeHistory";
 
 function EditableHourCell({
@@ -128,10 +128,11 @@ export default function PersonDetail() {
   const unassign = useAppStore((s) => s.unassignEmployeeFromProject);
   const assign = useAppStore((s) => s.assignEmployeeToProject);
   const transfers = useAppStore((s) => s.transfers);
+  const promotions = useAppStore((s) => s.promotions);
   const workingCalendar = useAppStore((s) => s.workingCalendar);
   const cycles = useAppStore((s) => s.cycles);
   const activeCycleId = useAppStore((s) => s.activeCycleId);
-  const [modal, setModal] = useState<null | "transfer" | "leaver" | "assign">(null);
+  const [modal, setModal] = useState<null | "transfer" | "leaver" | "assign" | "edit" | "promote">(null);
   const [showUnit, setShowUnit] = useState<"hours" | "fte">("hours");
   const [year, setYear] = useState<number>(() => activeCycleYear(cycles, activeCycleId));
 
@@ -255,6 +256,14 @@ export default function PersonDetail() {
             {formatPct(latestArve, 0)}
           </div>
           <div className="mt-3 flex items-center gap-2 flex-wrap justify-end">
+            <button className="btn" onClick={() => setModal("edit")}>
+              <Pencil className="w-3.5 h-3.5" /> Edit
+            </button>
+            {!employee.endDate && (
+              <button className="btn" onClick={() => setModal("promote")}>
+                <TrendingUp className="w-3.5 h-3.5" /> Promote
+              </button>
+            )}
             <button className="btn" onClick={() => setModal("transfer")}>
               <ArrowRightLeft className="w-3.5 h-3.5" /> Transfer
             </button>
@@ -273,6 +282,31 @@ export default function PersonDetail() {
       <TransferModal open={modal === "transfer"} onClose={() => setModal(null)} preselectLocalNumber={localNumber} />
       <AddLeaverModal open={modal === "leaver"} onClose={() => setModal(null)} preselectLocalNumber={localNumber} />
       <AssignProjectModal open={modal === "assign"} onClose={() => setModal(null)} preselectLocalNumber={localNumber} />
+      <EditPersonModal open={modal === "edit"} onClose={() => setModal(null)} preselectLocalNumber={localNumber} />
+      <PromoteModal open={modal === "promote"} onClose={() => setModal(null)} preselectLocalNumber={localNumber} />
+
+      {promotions.filter((p) => p.employeeLocalNumber === localNumber).length > 0 && (
+        <div className="card p-4">
+          <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-brand" /> Promotion history
+          </h2>
+          <ul className="space-y-1 text-sm">
+            {promotions
+              .filter((p) => p.employeeLocalNumber === localNumber)
+              .slice()
+              .sort((a, b) => b.effectivePeriod.localeCompare(a.effectivePeriod))
+              .map((p) => (
+                <li key={p.id} className="flex items-center justify-between">
+                  <span>
+                    <span className="font-mono text-xs">{p.effectivePeriod}</span> — Grade {p.fromGradeCode} → <strong>{p.toGradeCode}</strong>
+                    {p.reason && <span className="text-fg-muted"> · {p.reason}</span>}
+                  </span>
+                  <span className="text-[11px] text-fg-muted">{p.recordedAt.slice(0, 10)} · {p.recordedBy}</span>
+                </li>
+              ))}
+          </ul>
+        </div>
+      )}
 
       {transfers.filter((t) => t.employeeLocalNumber === localNumber).length > 0 && (
         <div className="card p-4">

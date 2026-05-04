@@ -27,12 +27,13 @@ duplicate selectors without cutting re-renders.
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `employees` | `Employee[]` | current roster; mutated by `addEmployee`, `transferEmployee`, `addPlaceholderForProject`, `setEmployeeCapabilities`, `setEmployeeGermanSpeaker`, `setEmployeeClearanceLevel`. Rows with `isPlaceholder: true` are forecast-only roles (see `placeholderRole`) — excluded from People directory, attrition, and capability mgmt; included in `gfsHours` and the project FTE chart |
+| `employees` | `Employee[]` | current roster; mutated by `addEmployee`, `updateEmployee`, `transferEmployee`, `promoteEmployee`, `addPlaceholderForProject`, `setEmployeeCapabilities`, `setEmployeeGermanSpeaker`, `setEmployeeClearanceLevel`. Rows with `isPlaceholder: true` are forecast-only roles (see `placeholderRole`) — excluded from People directory, attrition, and capability mgmt; included in `gfsHours` and the project FTE chart |
 | `snapshots` | `EmployeeMonthSnapshot[]` | per-employee-per-month observations (placeholders never have snapshots) |
 | `gfsHours` | `GfsHours[]` | timesheet rows; mutated by `assignEmployeeToProject` / `unassignEmployeeFromProject` / `addPlaceholderForProject` |
 | `joiners` / `leavers` | `Joiner[]` / `Leaver[]` | people-flow entries via `addJoiner` / `addLeaver`; `addJoiner` can materialize an `Employee` when `status === "actual"` |
 | `contractOfMandate` | `ContractOfMandate[]` | UZ contractor markers |
 | `transfers` | `Transfer[]` | inter-PU moves recorded by `transferEmployee` |
+| `promotions` | `Promotion[]` | grade changes with effective period; recorded by `promoteEmployee` (added in persist v3) |
 
 ### Forecast & planning
 

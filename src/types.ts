@@ -272,6 +272,17 @@ export interface Transfer {
   reason?: string;
 }
 
+export interface Promotion {
+  id: string;
+  employeeLocalNumber: string;
+  fromGradeCode: string;
+  toGradeCode: string;
+  effectivePeriod: Period;
+  recordedAt: string;
+  recordedBy: string;
+  reason?: string;
+}
+
 export interface PipelineOpportunity {
   id: string;
   name: string;

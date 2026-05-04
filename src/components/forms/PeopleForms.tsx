@@ -495,6 +495,251 @@ export function TransferModal({
   );
 }
 
+/* -------------------- Promote (grade change) -------------------- */
+
+export function PromoteModal({
+  open,
+  onClose,
+  preselectLocalNumber,
+}: CommonProps & { preselectLocalNumber?: string }) {
+  const promoteEmployee = useAppStore((s) => s.promoteEmployee);
+  const employees = useAppStore((s) => s.employees);
+  const grades = useAppStore((s) => s.grades);
+
+  const emp = employees.find((e) => e.localNumber === preselectLocalNumber);
+
+  const sortedGrades = useMemo(
+    () => [...grades].sort((a, b) => a.sortOrder - b.sortOrder),
+    [grades],
+  );
+
+  const suggestedNext = useMemo(() => {
+    if (!emp) return undefined;
+    const cur = sortedGrades.find((g) => g.code === emp.gradeCode);
+    if (!cur) return undefined;
+    return sortedGrades.find((g) => g.sortOrder > cur.sortOrder && !g.isContractor)?.code;
+  }, [emp, sortedGrades]);
+
+  const [toGradeCode, setToGradeCode] = useState<string>(suggestedNext ?? emp?.gradeCode ?? "");
+  const [effectivePeriod, setEffectivePeriod] = useState<Period>(currentPeriod());
+  const [reason, setReason] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setToGradeCode(suggestedNext ?? emp?.gradeCode ?? "");
+    setEffectivePeriod(currentPeriod());
+    setReason("");
+  }, [open, suggestedNext, emp?.gradeCode]);
+
+  function submit() {
+    if (!emp || !toGradeCode || emp.gradeCode === toGradeCode) return;
+    promoteEmployee({
+      localNumber: emp.localNumber,
+      toGradeCode,
+      effectivePeriod,
+      reason: reason.trim() || undefined,
+    });
+    onClose();
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Promote employee"
+      subtitle="Change the grade with an effective date. Recorded in the promotion history."
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <button
+            className="btn-primary"
+            onClick={submit}
+            disabled={!emp || !toGradeCode || emp.gradeCode === toGradeCode}
+          >
+            Promote
+          </button>
+        </>
+      }
+    >
+      {!emp ? (
+        <p className="text-sm text-fg-muted">No employee selected.</p>
+      ) : (
+        <div className="space-y-3">
+          <div className="text-sm">
+            <span className="text-fg-muted">Promoting</span>{" "}
+            <span className="font-medium">{emp.displayName}</span>{" "}
+            <span className="text-fg-muted font-mono text-[11px]">({emp.localNumber})</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <FieldRow label="From grade">
+              <input className="input" value={emp.gradeCode} disabled />
+            </FieldRow>
+            <FieldRow label="To grade" required>
+              <select
+                className="input"
+                value={toGradeCode}
+                onChange={(e) => setToGradeCode(e.target.value)}
+              >
+                {sortedGrades.map((g) => (
+                  <option key={g.code} value={g.code} disabled={g.code === emp.gradeCode}>
+                    {g.code} · {g.family}{g.code === emp.gradeCode ? " (current)" : ""}
+                  </option>
+                ))}
+              </select>
+            </FieldRow>
+          </div>
+          <FieldRow label="Effective period" required hint="The month in which the new grade takes effect">
+            <select
+              className="input"
+              value={effectivePeriod}
+              onChange={(e) => setEffectivePeriod(e.target.value)}
+            >
+              {rollingPeriods.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+          </FieldRow>
+          <FieldRow label="Reason" hint="Optional note for audit (e.g. annual review, promotion committee)">
+            <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} />
+          </FieldRow>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/* -------------------- Edit employee -------------------- */
+
+export function EditPersonModal({
+  open,
+  onClose,
+  preselectLocalNumber,
+}: CommonProps & { preselectLocalNumber?: string }) {
+  const updateEmployee = useAppStore((s) => s.updateEmployee);
+  const employees = useAppStore((s) => s.employees);
+  const locations = useAppStore((s) => s.locations);
+  const emp = employees.find((e) => e.localNumber === preselectLocalNumber);
+
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [ggid, setGgid] = useState("");
+  const [jobFunction, setJobFunction] = useState<JobFunction>("CSS");
+  const [locationCode, setLocationCode] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [fteCapacity, setFteCapacity] = useState(1);
+  const [engagement, setEngagement] = useState("UoP");
+  const [skills, setSkills] = useState("");
+
+  useEffect(() => {
+    if (!open || !emp) return;
+    setFirstName(emp.firstName);
+    setLastName(emp.lastName);
+    setGgid(emp.ggid ?? "");
+    setJobFunction(emp.jobFunction);
+    setLocationCode(emp.locationCode);
+    setStartDate(emp.startDate);
+    setFteCapacity(emp.fteCapacity);
+    setEngagement(emp.engagement);
+    setSkills(emp.skills.join(", "));
+  }, [open, emp]);
+
+  function submit() {
+    if (!emp) return;
+    if (!firstName.trim() || !lastName.trim()) return;
+    updateEmployee(emp.localNumber, {
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      ggid: ggid.trim() || undefined,
+      jobFunction,
+      locationCode,
+      startDate,
+      fteCapacity,
+      engagement: engagement.trim(),
+      skills: skills
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    });
+    onClose();
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Edit person"
+      subtitle="Correct identity, employment, or contact details. Grade changes use Promote; PU changes use Transfer."
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <button
+            className="btn-primary"
+            onClick={submit}
+            disabled={!emp || !firstName.trim() || !lastName.trim()}
+          >
+            Save changes
+          </button>
+        </>
+      }
+    >
+      {!emp ? (
+        <p className="text-sm text-fg-muted">No employee selected.</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          <FieldRow label="First name" required>
+            <input className="input" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+          </FieldRow>
+          <FieldRow label="Last name" required>
+            <input className="input" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+          </FieldRow>
+          <FieldRow label="Local number" hint="Identity — not editable">
+            <input className="input font-mono" value={emp.localNumber} disabled />
+          </FieldRow>
+          <FieldRow label="GGID" hint="Global Capgemini ID">
+            <input className="input font-mono" value={ggid} onChange={(e) => setGgid(e.target.value)} />
+          </FieldRow>
+          <FieldRow label="Job function">
+            <select className="input" value={jobFunction} onChange={(e) => setJobFunction(e.target.value as JobFunction)}>
+              <option value="CSS">CSS</option>
+              <option value="EEC">EEC</option>
+              <option value="Z">Z</option>
+            </select>
+          </FieldRow>
+          <FieldRow label="Location">
+            <select className="input" value={locationCode} onChange={(e) => setLocationCode(e.target.value)}>
+              {locations.map((l) => (
+                <option key={l.code} value={l.code}>{l.displayName} ({l.code})</option>
+              ))}
+            </select>
+          </FieldRow>
+          <FieldRow label="Start date" hint="Hire / contract start">
+            <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          </FieldRow>
+          <FieldRow label="FTE capacity" hint="Between 0 and 1">
+            <input
+              type="number"
+              step="0.1"
+              min={0}
+              max={1}
+              className="input"
+              value={fteCapacity}
+              onChange={(e) => setFteCapacity(parseFloat(e.target.value) || 0)}
+            />
+          </FieldRow>
+          <FieldRow label="Engagement" hint="UoP, B2B, Contract, …">
+            <input className="input" value={engagement} onChange={(e) => setEngagement(e.target.value)} />
+          </FieldRow>
+          <div className="col-span-2">
+            <FieldRow label="Skills" hint="Free-form, comma-separated">
+              <input className="input" value={skills} onChange={(e) => setSkills(e.target.value)} placeholder="React, Node, Java" />
+            </FieldRow>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 /* -------------------- Assign to project -------------------- */
 
 export function AssignProjectModal({

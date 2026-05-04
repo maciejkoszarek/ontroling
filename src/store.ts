@@ -30,6 +30,7 @@ import type {
   ProductionUnit,
   Project,
   ProjectDemandForecast,
+  Promotion,
   Role,
   Scenario,
   Transfer,
@@ -60,6 +61,7 @@ export interface AppState {
   leavers: Leaver[];
   contractOfMandate: ContractOfMandate[];
   transfers: Transfer[];
+  promotions: Promotion[];
 
   // ----- forecast & planning
   cycles: ForecastCycle[];
@@ -131,6 +133,30 @@ export interface AppState {
     effectivePeriod: Period;
     reason?: string;
   }) => void;
+  promoteEmployee: (args: {
+    localNumber: string;
+    toGradeCode: string;
+    effectivePeriod: Period;
+    reason?: string;
+  }) => void;
+  updateEmployee: (
+    localNumber: string,
+    patch: Partial<
+      Pick<
+        Employee,
+        | "firstName"
+        | "lastName"
+        | "displayName"
+        | "ggid"
+        | "jobFunction"
+        | "locationCode"
+        | "startDate"
+        | "fteCapacity"
+        | "engagement"
+        | "skills"
+      >
+    >,
+  ) => void;
   assignEmployeeToProject: (args: {
     localNumber: string;
     projectNumber: string;
@@ -408,6 +434,7 @@ export function migratePersistedState(
   if (version < 3) {
     if (!Array.isArray(s.hrMappings)) s.hrMappings = [];
     if (!Array.isArray(s.hrImports)) s.hrImports = [];
+    if (!Array.isArray(s.promotions)) s.promotions = [];
   }
   return s as unknown as AppState;
 }
@@ -976,6 +1003,8 @@ function initialState(): Omit<AppState, keyof {
   addJoiner: unknown;
   addLeaver: unknown;
   transferEmployee: unknown;
+  promoteEmployee: unknown;
+  updateEmployee: unknown;
   assignEmployeeToProject: unknown;
   unassignEmployeeFromProject: unknown;
   addPlaceholderForProject: unknown;
@@ -1021,6 +1050,7 @@ function initialState(): Omit<AppState, keyof {
     leavers: demo.leavers,
     contractOfMandate: demo.contractOfMandate,
     transfers: [],
+    promotions: [],
 
     cycles: demo.forecastCycles,
     activeCycleId: "fc-2026-04",
@@ -1314,6 +1344,84 @@ export const useAppStore = create<AppState>()(
           transfers: [transfer, ...state.transfers],
           employees,
           audit: [audit, ...state.audit].slice(0, 2000),
+        });
+      },
+
+      promoteEmployee: ({ localNumber, toGradeCode, effectivePeriod, reason }) => {
+        const emp = get().employees.find((e) => e.localNumber === localNumber);
+        if (!emp) return;
+        if (emp.gradeCode === toGradeCode) return;
+        const now = new Date().toISOString();
+        const promotion: Promotion = {
+          id: uid("pr-"),
+          employeeLocalNumber: localNumber,
+          fromGradeCode: emp.gradeCode,
+          toGradeCode,
+          effectivePeriod,
+          recordedAt: now,
+          recordedBy: get().user.name,
+          reason,
+        };
+        const employees = get().employees.map((e) =>
+          e.localNumber === localNumber ? { ...e, gradeCode: toGradeCode } : e,
+        );
+        const audit: AuditEntry = {
+          id: uid("au-"),
+          actor: get().user.name,
+          entityType: "employee",
+          entityId: localNumber,
+          action: "update",
+          before: { gradeCode: emp.gradeCode },
+          after: { gradeCode: toGradeCode, effectivePeriod, reason },
+          ts: now,
+        };
+        set({
+          promotions: [promotion, ...get().promotions],
+          employees,
+          audit: [audit, ...get().audit].slice(0, 2000),
+        });
+      },
+
+      updateEmployee: (localNumber, patch) => {
+        const emp = get().employees.find((e) => e.localNumber === localNumber);
+        if (!emp) return;
+        const empRec = emp as unknown as Record<string, unknown>;
+        const cleaned: typeof patch = {};
+        const before: Record<string, unknown> = {};
+        const after: Record<string, unknown> = {};
+        for (const k of Object.keys(patch) as Array<keyof typeof patch>) {
+          const val = patch[k];
+          if (val === undefined) continue;
+          if (empRec[k as string] === val) continue;
+          (cleaned as Record<string, unknown>)[k] = val;
+          before[k] = empRec[k as string];
+          after[k] = val;
+        }
+        if (Object.keys(cleaned).length === 0) return;
+        const merged: Employee = { ...emp, ...cleaned };
+        if (cleaned.firstName !== undefined || cleaned.lastName !== undefined) {
+          if (cleaned.displayName === undefined) {
+            merged.displayName = `${merged.firstName} ${merged.lastName}`;
+            after.displayName = merged.displayName;
+            before.displayName = emp.displayName;
+          }
+        }
+        const now = new Date().toISOString();
+        const audit: AuditEntry = {
+          id: uid("au-"),
+          actor: get().user.name,
+          entityType: "employee",
+          entityId: localNumber,
+          action: "update",
+          before,
+          after,
+          ts: now,
+        };
+        set({
+          employees: get().employees.map((e) =>
+            e.localNumber === localNumber ? merged : e,
+          ),
+          audit: [audit, ...get().audit].slice(0, 2000),
         });
       },
 
@@ -2243,6 +2351,9 @@ export const useAppStore = create<AppState>()(
         if (Array.isArray(state.productionUnits)) {
           demo.setLivePuIndex(state.productionUnits);
         }
+        if (!Array.isArray(state.promotions)) {
+          state.promotions = [];
+        }
       },
       partialize: (s) => ({
         activeCycleId: s.activeCycleId,
@@ -2261,6 +2372,7 @@ export const useAppStore = create<AppState>()(
         joiners: s.joiners,
         leavers: s.leavers,
         transfers: s.transfers,
+        promotions: s.promotions,
         gfsHours: s.gfsHours,
         capabilities: s.capabilities,
         projects: s.projects,
