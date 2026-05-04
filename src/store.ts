@@ -205,6 +205,30 @@ export interface AppState {
     warnings: string[];
   }) => void;
 
+  /**
+   * Replaces the people roster from a CCA_People-style import. Rebuilds
+   * project references by employee id: gfsHours rows whose employee is no
+   * longer present are dropped, and any project that ends up with zero
+   * gfsHours rows AND zero projectDemand rows is removed. Controller-only.
+   */
+  replacePeopleAndPruneProjects: (payload: {
+    employees: Employee[];
+    snapshots: EmployeeMonthSnapshot[];
+    joiners: Joiner[];
+    leavers: Leaver[];
+    fileName: string;
+    /** Optional hints from the parser: puCode → People Unit display name. */
+    puCodeToPeopleUnit?: Record<string, string>;
+  }) => {
+    employeesBefore: number;
+    employeesAfter: number;
+    gfsHoursBefore: number;
+    gfsHoursAfter: number;
+    projectsBefore: number;
+    projectsAfter: number;
+    removedProjectNumbers: string[];
+  };
+
   resetToDemo: () => void;
   /**
    * Applies an import patch (subset of AppState slices) after the user
@@ -980,6 +1004,7 @@ function initialState(): Omit<AppState, keyof {
   canOverrideStaleness: unknown;
   buildResolvePuFn: unknown;
   commitHrImport: unknown;
+  replacePeopleAndPruneProjects: unknown;
 }> {
   return {
     productionUnits: demo.productionUnits,
@@ -1888,7 +1913,189 @@ export const useAppStore = create<AppState>()(
 
       resetToDemo: () => {
         const s = initialState();
+        demo.setLivePuIndex(s.productionUnits);
         set({ ...s });
+      },
+
+      replacePeopleAndPruneProjects: (payload) => {
+        const state = get();
+        const employeesBefore = state.employees.length;
+        const gfsBefore = state.gfsHours.length;
+        const projectsBefore = state.projects.length;
+        const newIds = new Set(payload.employees.map((e) => e.localNumber));
+
+        // 0. Augment taxonomies for any unseen codes referenced by the imported
+        //    roster. Without this, lookups (puLabel, grade dropdown, location
+        //    name) silently fall back to the raw code which looks like a bug
+        //    even though the underlying data is correct.
+        const knownPu = new Set(state.productionUnits.map((p) => p.code));
+        const newPus: ProductionUnit[] = [];
+        const puNameHint = payload.puCodeToPeopleUnit ?? {};
+        for (const e of payload.employees) {
+          if (!knownPu.has(e.puCode)) {
+            knownPu.add(e.puCode);
+            const friendly = puNameHint[e.puCode]?.trim();
+            const shortName = friendly
+              ? friendly.replace(/\s+/g, "_").replace(/[^A-Za-z0-9_]/g, "")
+              : e.puCode;
+            newPus.push({
+              code: e.puCode,
+              shortName: shortName || e.puCode,
+              displayName: friendly || e.puCode,
+              sbu: state.productionUnits[0]?.sbu ?? "",
+              bu: state.productionUnits[0]?.bu ?? "CCA",
+              sortOrder:
+                Math.max(0, ...state.productionUnits.map((p) => p.sortOrder)) +
+                10 +
+                newPus.length,
+              active: true,
+            });
+          }
+        }
+        const productionUnits = newPus.length
+          ? [...state.productionUnits, ...newPus]
+          : state.productionUnits;
+        if (newPus.length) demo.setLivePuIndex(productionUnits);
+
+        const knownGrades = new Set(state.grades.map((g) => g.code));
+        const newGrades: Grade[] = [];
+        for (const e of payload.employees) {
+          if (!e.gradeCode || knownGrades.has(e.gradeCode)) continue;
+          knownGrades.add(e.gradeCode);
+          // Heuristic: the first letter implies the family — D/E ≈ management,
+          // C ≈ senior, B ≈ dev, A ≈ intern, anything else falls back to dev.
+          const head = e.gradeCode.charAt(0).toUpperCase();
+          const family: Grade["family"] =
+            head === "D" || head === "E"
+              ? "management"
+              : head === "C"
+                ? "senior"
+                : head === "B"
+                  ? "dev"
+                  : head === "A"
+                    ? "intern"
+                    : "dev";
+          newGrades.push({
+            code: e.gradeCode,
+            family,
+            sortOrder:
+              Math.max(0, ...state.grades.map((g) => g.sortOrder)) +
+              10 +
+              newGrades.length,
+            isContractor: false,
+          });
+        }
+        const grades = newGrades.length ? [...state.grades, ...newGrades] : state.grades;
+
+        const knownLocations = new Set(state.locations.map((l) => l.code));
+        const newLocations: Location[] = [];
+        const locDisplay: Record<string, string> = {
+          KAT: "Katowice",
+          OPO: "Opole",
+        };
+        for (const e of payload.employees) {
+          if (!e.locationCode || knownLocations.has(e.locationCode)) continue;
+          knownLocations.add(e.locationCode);
+          newLocations.push({
+            code: e.locationCode,
+            displayName: locDisplay[e.locationCode] ?? e.locationCode,
+            country: "PL",
+          });
+        }
+        const locations = newLocations.length
+          ? [...state.locations, ...newLocations]
+          : state.locations;
+
+        // 1. Filter gfsHours by surviving Employee IDs.
+        const gfsHours = state.gfsHours.filter((h) => newIds.has(h.employeeLocalNumber));
+
+        // 2. Set of project numbers that still have a reference.
+        const referencedProjects = new Set<string>();
+        for (const h of gfsHours) referencedProjects.add(h.projectNumber);
+        for (const d of state.projectDemand) referencedProjects.add(d.projectNumber);
+
+        // 3. Drop projects with no remaining links.
+        const projects = state.projects.filter((p) => referencedProjects.has(p.projectNumber));
+        const survivingProjectNumbers = new Set(projects.map((p) => p.projectNumber));
+        const removedProjectNumbers = state.projects
+          .map((p) => p.projectNumber)
+          .filter((n) => !survivingProjectNumbers.has(n));
+        const projectDemand = state.projectDemand.filter((d) =>
+          survivingProjectNumbers.has(d.projectNumber),
+        );
+
+        // 4. Snapshots: replace with the file's snapshots — they describe
+        //    the imported month authoritatively.
+        const snapshots = payload.snapshots;
+
+        // 5. contractOfMandate / transfers — drop rows for gone employees.
+        const contractOfMandate = state.contractOfMandate.filter((c) =>
+          newIds.has(c.employeeLocalNumber),
+        );
+        const transfers = state.transfers.filter((t) => newIds.has(t.employeeLocalNumber));
+
+        const now = new Date().toISOString();
+        const audit: AuditEntry = {
+          id: uid("au-"),
+          actor: state.user.name,
+          entityType: "import",
+          entityId: payload.fileName,
+          action: "update",
+          before: {
+            employees: employeesBefore,
+            gfsHours: gfsBefore,
+            projects: projectsBefore,
+          },
+          after: {
+            employees: payload.employees.length,
+            gfsHours: gfsHours.length,
+            projects: projects.length,
+            removedProjects: removedProjectNumbers.length,
+            source: "CCA_People",
+          },
+          ts: now,
+        };
+
+        set({
+          productionUnits,
+          grades,
+          locations,
+          employees: payload.employees,
+          snapshots,
+          joiners: payload.joiners,
+          leavers: payload.leavers,
+          gfsHours,
+          projects,
+          projectDemand,
+          contractOfMandate,
+          transfers,
+          lastIngest: {
+            fileName: payload.fileName,
+            sheetNames: [],
+            rowCounts: {
+              employees: payload.employees.length,
+              snapshots: snapshots.length,
+              gfsHours_kept: gfsHours.length,
+              projects_kept: projects.length,
+              taxonomy_added:
+                newPus.length + newGrades.length + newLocations.length,
+              projects_removed: removedProjectNumbers.length,
+            },
+            warnings: [],
+            at: now,
+          },
+          audit: [audit, ...state.audit].slice(0, 2000),
+        });
+
+        return {
+          employeesBefore,
+          employeesAfter: payload.employees.length,
+          gfsHoursBefore: gfsBefore,
+          gfsHoursAfter: gfsHours.length,
+          projectsBefore,
+          projectsAfter: projects.length,
+          removedProjectNumbers,
+        };
       },
 
       applyImportPatch: (patch, source) => {
@@ -2033,6 +2240,9 @@ export const useAppStore = create<AppState>()(
           state.hrMappings = seedHrMappings(state.productionUnits);
         }
         if (!Array.isArray(state.hrImports)) state.hrImports = [];
+        if (Array.isArray(state.productionUnits)) {
+          demo.setLivePuIndex(state.productionUnits);
+        }
       },
       partialize: (s) => ({
         activeCycleId: s.activeCycleId,
@@ -2054,6 +2264,9 @@ export const useAppStore = create<AppState>()(
         gfsHours: s.gfsHours,
         capabilities: s.capabilities,
         projects: s.projects,
+        productionUnits: s.productionUnits,
+        grades: s.grades,
+        locations: s.locations,
         workingCalendar: s.workingCalendar,
         hrMappings: s.hrMappings,
         hrImports: s.hrImports,
