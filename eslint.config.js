@@ -18,6 +18,7 @@ export default tseslint.config(
       "tailwind.config.js",
       "vite.config.ts",
       "vitest.config.ts",
+      ".claude/worktrees/**",
     ],
   },
   js.configs.recommended,
