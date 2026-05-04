@@ -20,7 +20,9 @@ import type {
   Joiner,
   Leaver,
   Location,
+  Bu,
   MarketUnit,
+  Sbu,
   Period,
   PipelineOpportunity,
   ProductionUnit,
@@ -40,6 +42,8 @@ import { defaultEntryForPeriod, seedWorkingCalendar } from "./lib/workingCalenda
 export interface AppState {
   // ----- reference
   productionUnits: ProductionUnit[];
+  sbus: Sbu[];
+  bus: Bu[];
   marketUnits: MarketUnit[];
   locations: Location[];
   grades: Grade[];
@@ -135,6 +139,18 @@ export interface AppState {
 
   addProject: (p: Omit<Project, "tags"> & { tags?: string[] }) => void;
   updateProject: (projectNumber: string, patch: Partial<Omit<Project, "projectNumber">>) => void;
+
+  addSbu: (s: Sbu) => string | null;
+  updateSbu: (code: string, patch: Partial<Omit<Sbu, "code">>) => void;
+  removeSbu: (code: string) => string | null;
+
+  addBu: (b: Bu) => string | null;
+  updateBu: (code: string, patch: Partial<Omit<Bu, "code">>) => void;
+  removeBu: (code: string) => string | null;
+
+  addMarketUnit: (m: MarketUnit) => string | null;
+  updateMarketUnit: (code: string, patch: Partial<Omit<MarketUnit, "code">>) => void;
+  removeMarketUnit: (code: string) => string | null;
 
   setWorkingCalendarEntry: (period: Period, patch: Partial<Omit<WorkingCalendarEntry, "period">>) => void;
   resetWorkingCalendar: (fromYear?: number, toYear?: number) => void;
@@ -296,6 +312,15 @@ function initialState(): Omit<AppState, keyof {
   unassignEmployeeFromProject: unknown;
   addProject: unknown;
   updateProject: unknown;
+  addSbu: unknown;
+  updateSbu: unknown;
+  removeSbu: unknown;
+  addBu: unknown;
+  updateBu: unknown;
+  removeBu: unknown;
+  addMarketUnit: unknown;
+  updateMarketUnit: unknown;
+  removeMarketUnit: unknown;
   setWorkingCalendarEntry: unknown;
   resetWorkingCalendar: unknown;
   addCapability: unknown;
@@ -314,6 +339,8 @@ function initialState(): Omit<AppState, keyof {
 }> {
   return {
     productionUnits: demo.productionUnits,
+    sbus: demo.sbus,
+    bus: demo.bus,
     marketUnits: demo.marketUnits,
     locations: demo.locations,
     grades: demo.grades,
@@ -758,6 +785,228 @@ export const useAppStore = create<AppState>()(
         });
       },
 
+      addSbu: (s) => {
+        const code = s.code.trim();
+        if (!code) return "Code is required.";
+        if (get().sbus.some((x) => x.code === code)) return `SBU "${code}" already exists.`;
+        const sbu: Sbu = {
+          code,
+          displayName: s.displayName.trim() || code,
+          sortOrder: s.sortOrder,
+        };
+        const audit: AuditEntry = {
+          id: uid("au-"),
+          actor: get().user.name,
+          entityType: "sbu",
+          entityId: code,
+          action: "create",
+          after: sbu,
+          ts: new Date().toISOString(),
+        };
+        set({ sbus: [...get().sbus, sbu], audit: [audit, ...get().audit].slice(0, 2000) });
+        return null;
+      },
+
+      updateSbu: (code, patch) => {
+        const before = get().sbus.find((s) => s.code === code);
+        if (!before) return;
+        const after: Sbu = {
+          ...before,
+          displayName: patch.displayName !== undefined ? patch.displayName.trim() || before.displayName : before.displayName,
+          sortOrder: patch.sortOrder !== undefined ? patch.sortOrder : before.sortOrder,
+        };
+        if (after.displayName === before.displayName && after.sortOrder === before.sortOrder) return;
+        const audit: AuditEntry = {
+          id: uid("au-"),
+          actor: get().user.name,
+          entityType: "sbu",
+          entityId: code,
+          action: "update",
+          before,
+          after,
+          ts: new Date().toISOString(),
+        };
+        set({
+          sbus: get().sbus.map((s) => (s.code === code ? after : s)),
+          audit: [audit, ...get().audit].slice(0, 2000),
+        });
+      },
+
+      removeSbu: (code) => {
+        const before = get().sbus.find((s) => s.code === code);
+        if (!before) return null;
+        const dependentBus = get().bus.filter((b) => b.sbuCode === code).map((b) => b.code);
+        if (dependentBus.length > 0) {
+          return `SBU "${code}" has ${dependentBus.length} BU(s) attached: ${dependentBus.join(", ")}. Reassign or remove them first.`;
+        }
+        const audit: AuditEntry = {
+          id: uid("au-"),
+          actor: get().user.name,
+          entityType: "sbu",
+          entityId: code,
+          action: "delete",
+          before,
+          ts: new Date().toISOString(),
+        };
+        set({
+          sbus: get().sbus.filter((s) => s.code !== code),
+          audit: [audit, ...get().audit].slice(0, 2000),
+        });
+        return null;
+      },
+
+      addBu: (b) => {
+        const code = b.code.trim();
+        if (!code) return "Code is required.";
+        if (get().bus.some((x) => x.code === code)) return `BU "${code}" already exists.`;
+        if (!get().sbus.some((s) => s.code === b.sbuCode)) return `SBU "${b.sbuCode}" does not exist.`;
+        const bu: Bu = {
+          code,
+          displayName: b.displayName.trim() || code,
+          sbuCode: b.sbuCode,
+          sortOrder: b.sortOrder,
+        };
+        const audit: AuditEntry = {
+          id: uid("au-"),
+          actor: get().user.name,
+          entityType: "bu",
+          entityId: code,
+          action: "create",
+          after: bu,
+          ts: new Date().toISOString(),
+        };
+        set({ bus: [...get().bus, bu], audit: [audit, ...get().audit].slice(0, 2000) });
+        return null;
+      },
+
+      updateBu: (code, patch) => {
+        const before = get().bus.find((b) => b.code === code);
+        if (!before) return;
+        if (patch.sbuCode !== undefined && !get().sbus.some((s) => s.code === patch.sbuCode)) return;
+        const after: Bu = {
+          ...before,
+          displayName: patch.displayName !== undefined ? patch.displayName.trim() || before.displayName : before.displayName,
+          sbuCode: patch.sbuCode !== undefined ? patch.sbuCode : before.sbuCode,
+          sortOrder: patch.sortOrder !== undefined ? patch.sortOrder : before.sortOrder,
+        };
+        if (
+          after.displayName === before.displayName &&
+          after.sbuCode === before.sbuCode &&
+          after.sortOrder === before.sortOrder
+        ) return;
+        const audit: AuditEntry = {
+          id: uid("au-"),
+          actor: get().user.name,
+          entityType: "bu",
+          entityId: code,
+          action: "update",
+          before,
+          after,
+          ts: new Date().toISOString(),
+        };
+        set({
+          bus: get().bus.map((b) => (b.code === code ? after : b)),
+          audit: [audit, ...get().audit].slice(0, 2000),
+        });
+      },
+
+      removeBu: (code) => {
+        const before = get().bus.find((b) => b.code === code);
+        if (!before) return null;
+        const dependentMus = get().marketUnits.filter((m) => m.buCode === code).map((m) => m.code);
+        if (dependentMus.length > 0) {
+          return `BU "${code}" has ${dependentMus.length} MU(s) attached: ${dependentMus.join(", ")}. Reassign or remove them first.`;
+        }
+        const audit: AuditEntry = {
+          id: uid("au-"),
+          actor: get().user.name,
+          entityType: "bu",
+          entityId: code,
+          action: "delete",
+          before,
+          ts: new Date().toISOString(),
+        };
+        set({
+          bus: get().bus.filter((b) => b.code !== code),
+          audit: [audit, ...get().audit].slice(0, 2000),
+        });
+        return null;
+      },
+
+      addMarketUnit: (m) => {
+        const code = m.code.trim();
+        if (!code) return "Code is required.";
+        if (get().marketUnits.some((x) => x.code === code)) return `MU "${code}" already exists.`;
+        if (!get().bus.some((b) => b.code === m.buCode)) return `BU "${m.buCode}" does not exist.`;
+        const mu: MarketUnit = {
+          code,
+          displayName: m.displayName.trim() || code,
+          buCode: m.buCode,
+        };
+        const audit: AuditEntry = {
+          id: uid("au-"),
+          actor: get().user.name,
+          entityType: "market_unit",
+          entityId: code,
+          action: "create",
+          after: mu,
+          ts: new Date().toISOString(),
+        };
+        set({ marketUnits: [...get().marketUnits, mu], audit: [audit, ...get().audit].slice(0, 2000) });
+        return null;
+      },
+
+      updateMarketUnit: (code, patch) => {
+        const before = get().marketUnits.find((m) => m.code === code);
+        if (!before) return;
+        if (patch.buCode !== undefined && !get().bus.some((b) => b.code === patch.buCode)) return;
+        const after: MarketUnit = {
+          ...before,
+          displayName: patch.displayName !== undefined ? patch.displayName.trim() || before.displayName : before.displayName,
+          buCode: patch.buCode !== undefined ? patch.buCode : before.buCode,
+        };
+        if (after.displayName === before.displayName && after.buCode === before.buCode) return;
+        const audit: AuditEntry = {
+          id: uid("au-"),
+          actor: get().user.name,
+          entityType: "market_unit",
+          entityId: code,
+          action: "update",
+          before,
+          after,
+          ts: new Date().toISOString(),
+        };
+        set({
+          marketUnits: get().marketUnits.map((m) => (m.code === code ? after : m)),
+          audit: [audit, ...get().audit].slice(0, 2000),
+        });
+      },
+
+      removeMarketUnit: (code) => {
+        const before = get().marketUnits.find((m) => m.code === code);
+        if (!before) return null;
+        const dependentProjects = get().projects.filter((p) => p.marketUnit === code).map((p) => p.projectNumber);
+        if (dependentProjects.length > 0) {
+          const sample = dependentProjects.slice(0, 3).join(", ");
+          const more = dependentProjects.length > 3 ? `, +${dependentProjects.length - 3} more` : "";
+          return `MU "${code}" is used by ${dependentProjects.length} project(s) (${sample}${more}). Reassign them first.`;
+        }
+        const audit: AuditEntry = {
+          id: uid("au-"),
+          actor: get().user.name,
+          entityType: "market_unit",
+          entityId: code,
+          action: "delete",
+          before,
+          ts: new Date().toISOString(),
+        };
+        set({
+          marketUnits: get().marketUnits.filter((m) => m.code !== code),
+          audit: [audit, ...get().audit].slice(0, 2000),
+        });
+        return null;
+      },
+
       setWorkingCalendarEntry: (period, patch) => {
         const entries = get().workingCalendar;
         const idx = entries.findIndex((e) => e.period === period);
@@ -1096,6 +1345,8 @@ export const useAppStore = create<AppState>()(
         if (get().role !== "controller") return;
         const safeKeys: ReadonlyArray<keyof AppState> = [
           "productionUnits",
+          "sbus",
+          "bus",
           "marketUnits",
           "locations",
           "grades",
@@ -1140,8 +1391,8 @@ export const useAppStore = create<AppState>()(
       },
     }),
     {
-      name: "cca-practiceview-v2",
-      version: 2,
+      name: "cca-practiceview-v3",
+      version: 3,
       storage: createJSONStorage(() => quotaSafeStorage()),
       migrate: (persisted, version) => {
         if (!persisted || typeof persisted !== "object") return persisted as AppState;
@@ -1155,6 +1406,40 @@ export const useAppStore = create<AppState>()(
               ...p,
               kind: (p.kind as string | undefined) ?? "project",
             }));
+          }
+        }
+        if (version < 3) {
+          // SBU/BU promoted to first-class entities. Synthesize from any
+          // free-form `sbu` strings on persisted MarketUnits, and migrate the
+          // MU shape from `{ sbu }` to `{ buCode }`.
+          if (Array.isArray(s.marketUnits)) {
+            const mus = s.marketUnits as Record<string, unknown>[];
+            const sbuMap = new Map<string, { code: string; displayName: string }>();
+            for (const m of mus) {
+              const sbu = typeof m.sbu === "string" ? m.sbu.trim() : "";
+              if (sbu && !sbuMap.has(sbu)) {
+                const code = sbu.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "DEFAULT";
+                sbuMap.set(sbu, { code, displayName: sbu });
+              }
+            }
+            const sbusList = Array.from(sbuMap.values()).map((x, i) => ({ ...x, sortOrder: (i + 1) * 10 }));
+            // One default BU per SBU, sharing the same display, so existing MUs have a parent.
+            const busList = sbusList.map((sb, i) => ({
+              code: `${sb.code}_DEFAULT`,
+              displayName: `${sb.displayName} (default)`,
+              sbuCode: sb.code,
+              sortOrder: (i + 1) * 10,
+            }));
+            const buBySbuName = new Map(
+              Array.from(sbuMap.entries()).map(([name, sb]) => [name, `${sb.code}_DEFAULT`]),
+            );
+            s.sbus = sbusList;
+            s.bus = busList;
+            s.marketUnits = mus.map((m) => {
+              const sbuName = typeof m.sbu === "string" ? m.sbu.trim() : "";
+              const buCode = (m.buCode as string | undefined) ?? buBySbuName.get(sbuName) ?? busList[0]?.code ?? "";
+              return { code: m.code, displayName: m.displayName, buCode };
+            });
           }
         }
         return s as unknown as AppState;
@@ -1188,6 +1473,9 @@ export const useAppStore = create<AppState>()(
         gfsHours: s.gfsHours,
         capabilities: s.capabilities,
         projects: s.projects,
+        sbus: s.sbus,
+        bus: s.bus,
+        marketUnits: s.marketUnits,
         workingCalendar: s.workingCalendar,
       }),
     },

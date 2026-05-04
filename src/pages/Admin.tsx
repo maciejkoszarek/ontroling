@@ -5,6 +5,7 @@ import { Plus, Check, X, Lock, Archive, PenLine, ClipboardCheck, CalendarDays, R
 import type { CycleStatus, Role } from "../types";
 import { defaultEntryForPeriod, indexWorkingCalendar, yearPeriods } from "../lib/workingCalendar";
 import AdminDataBackup from "../components/AdminDataBackup";
+import AdminOrgHierarchy from "../components/AdminOrgHierarchy";
 
 const ROLES: Array<{ value: Role; label: string }> = [
   { value: "controller", label: "Controller" },
@@ -29,7 +30,6 @@ export default function Admin() {
   const density = useAppStore((s) => s.density);
   const setDensity = useAppStore((s) => s.setDensity);
   const pus = useAppStore((s) => s.productionUnits);
-  const mus = useAppStore((s) => s.marketUnits);
   const workingCalendar = useAppStore((s) => s.workingCalendar);
   const setWorkingCalendarEntry = useAppStore((s) => s.setWorkingCalendarEntry);
   const resetWorkingCalendar = useAppStore((s) => s.resetWorkingCalendar);
@@ -151,53 +151,31 @@ export default function Admin() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="card p-4">
-          <h2 className="text-sm font-semibold mb-3">Production Units</h2>
-          <table className="w-full text-sm">
-            <thead>
-              <tr>
-                <th className="table-th">Short name</th>
-                <th className="table-th">Display name</th>
-                <th className="table-th">Code</th>
-                <th className="table-th text-right">Active</th>
+      <div className="card p-4">
+        <h2 className="text-sm font-semibold mb-3">Production Units</h2>
+        <table className="w-full text-sm">
+          <thead>
+            <tr>
+              <th className="table-th">Short name</th>
+              <th className="table-th">Display name</th>
+              <th className="table-th">Code</th>
+              <th className="table-th text-right">Active</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pus.map((p) => (
+              <tr key={p.code}>
+                <td className="table-td font-medium">{p.shortName}</td>
+                <td className="table-td">{p.displayName}</td>
+                <td className="table-td font-mono text-[11px]">{p.code}</td>
+                <td className="table-td text-right">{p.active ? <Check className="w-4 h-4 text-success inline" /> : <X className="w-4 h-4 text-danger inline" />}</td>
               </tr>
-            </thead>
-            <tbody>
-              {pus.map((p) => (
-                <tr key={p.code}>
-                  <td className="table-td font-medium">{p.shortName}</td>
-                  <td className="table-td">{p.displayName}</td>
-                  <td className="table-td font-mono text-[11px]">{p.code}</td>
-                  <td className="table-td text-right">{p.active ? <Check className="w-4 h-4 text-success inline" /> : <X className="w-4 h-4 text-danger inline" />}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="card p-4">
-          <h2 className="text-sm font-semibold mb-3">Market Units</h2>
-          <table className="w-full text-sm">
-            <thead>
-              <tr>
-                <th className="table-th">Code</th>
-                <th className="table-th">Display</th>
-                <th className="table-th">SBU</th>
-              </tr>
-            </thead>
-            <tbody>
-              {mus.map((m) => (
-                <tr key={m.code}>
-                  <td className="table-td font-mono text-[11px]">{m.code}</td>
-                  <td className="table-td">{m.displayName}</td>
-                  <td className="table-td text-fg-muted">{m.sbu}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
       </div>
+
+      <AdminOrgHierarchy />
 
       <div className="card p-4">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">

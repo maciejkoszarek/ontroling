@@ -18,7 +18,9 @@ import {
   type Joiner,
   type Leaver,
   type Location,
+  type Bu,
   type MarketUnit,
+  type Sbu,
   type PipelineOpportunity,
   type ProductionUnit,
   type Project,
@@ -46,6 +48,14 @@ export const productionUnits: ProductionUnit[] = [
 
 export const leafPuCodes = productionUnits.filter((p) => !p.isVirtual).map((p) => p.code);
 export const sePuCodes = ["PL01NC03", "PL01NC04", "PL01NC05", "PL01NC06", "PL01NC07"];
+
+export const sbus: Sbu[] = [
+  { code: "GDC_PL_ABL", displayName: "GDC PL ABL", sortOrder: 10 },
+];
+
+export const bus: Bu[] = [
+  { code: "CCA", displayName: "CCA", sbuCode: "GDC_PL_ABL", sortOrder: 10 },
+];
 
 export const marketUnits: MarketUnit[] = realMarketUnits;
 

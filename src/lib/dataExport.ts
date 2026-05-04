@@ -105,6 +105,8 @@ export function buildExportTables(state: AppState): ExportTable[] {
 
   return [
     { name: "productionUnits", rows: normalize(state.productionUnits) },
+    { name: "sbus", rows: normalize(state.sbus) },
+    { name: "bus", rows: normalize(state.bus) },
     { name: "marketUnits", rows: normalize(state.marketUnits) },
     { name: "locations", rows: normalize(state.locations) },
     { name: "grades", rows: normalize(state.grades) },

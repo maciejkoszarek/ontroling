@@ -2,11 +2,13 @@ import * as XLSX from "xlsx";
 import type { AppState } from "../store";
 import type {
   AuditEntry,
+  Bu,
   Employee,
   ForecastCell,
   MarketUnit,
   Project,
   ProductionUnit,
+  Sbu,
   WorkingCalendarEntry,
 } from "../types";
 
@@ -108,13 +110,35 @@ function parseProductionUnits(rows: Record<string, unknown>[]): ProductionUnit[]
     }));
 }
 
+function parseSbus(rows: Record<string, unknown>[]): Sbu[] {
+  return rows
+    .filter((r) => r.code)
+    .map((r) => ({
+      code: coerceString(r.code),
+      displayName: coerceString(r.displayName),
+      sortOrder: r.sortOrder === "" || r.sortOrder === undefined ? undefined : coerceNumber(r.sortOrder),
+    }));
+}
+
+function parseBus(rows: Record<string, unknown>[]): Bu[] {
+  return rows
+    .filter((r) => r.code)
+    .map((r) => ({
+      code: coerceString(r.code),
+      displayName: coerceString(r.displayName),
+      sbuCode: coerceString(r.sbuCode),
+      sortOrder: r.sortOrder === "" || r.sortOrder === undefined ? undefined : coerceNumber(r.sortOrder),
+    }));
+}
+
 function parseMarketUnits(rows: Record<string, unknown>[]): MarketUnit[] {
   return rows
     .filter((r) => r.code)
     .map((r) => ({
       code: coerceString(r.code),
       displayName: coerceString(r.displayName),
-      sbu: coerceString(r.sbu),
+      // Accept legacy `sbu` column as a fallback so old exports still import.
+      buCode: coerceString(r.buCode) || coerceString(r.sbu),
     }));
 }
 
@@ -261,6 +285,8 @@ export function validateWorkbook(wb: XLSX.WorkBook): ImportReport {
     apply: (rows: Record<string, unknown>[]) => void;
   }> = [
     { name: "productionUnits", apply: (r) => { patch.productionUnits = parseProductionUnits(r); } },
+    { name: "sbus", apply: (r) => { patch.sbus = parseSbus(r); } },
+    { name: "bus", apply: (r) => { patch.bus = parseBus(r); } },
     { name: "marketUnits", apply: (r) => { patch.marketUnits = parseMarketUnits(r); } },
     { name: "projects", apply: (r) => { patch.projects = parseProjects(r); } },
     { name: "employees", apply: (r) => { patch.employees = parseEmployees(r); } },
