@@ -27,12 +27,13 @@ duplicate selectors without cutting re-renders.
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `employees` | `Employee[]` | current roster; mutated by `addEmployee`, `transferEmployee`, `setEmployeeCapabilities`, `setEmployeeGermanSpeaker`, `setEmployeeClearanceLevel` |
+| `employees` | `Employee[]` | current roster; mutated by `addEmployee`, `updateEmployee`, `transferEmployee`, `promoteEmployee`, `setEmployeeCapabilities`, `setEmployeeGermanSpeaker`, `setEmployeeClearanceLevel` |
 | `snapshots` | `EmployeeMonthSnapshot[]` | per-employee-per-month observations |
 | `gfsHours` | `GfsHours[]` | timesheet rows; mutated by `assignEmployeeToProject` / `unassignEmployeeFromProject` |
 | `joiners` / `leavers` | `Joiner[]` / `Leaver[]` | people-flow entries via `addJoiner` / `addLeaver`; `addJoiner` can materialize an `Employee` when `status === "actual"` |
 | `contractOfMandate` | `ContractOfMandate[]` | UZ contractor markers |
 | `transfers` | `Transfer[]` | inter-PU moves recorded by `transferEmployee` |
+| `promotions` | `Promotion[]` | grade changes with effective period; recorded by `promoteEmployee` (added in persist v3) |
 
 ### Forecast & planning
 
