@@ -35,7 +35,7 @@ import * as demo from "./lib/demoData";
 import { checkArithmeticIdentities, validateForecastCell } from "./lib/forecast";
 import { DEFAULT_COMMIT_PROBABILITY } from "./lib/projectHelpers";
 import { clamp, uid } from "./lib/utils";
-import { defaultEntryForPeriod, seedWorkingCalendar } from "./lib/workingCalendar";
+import { defaultEntryForPeriod, hoursForPeriod, indexWorkingCalendar, seedWorkingCalendar } from "./lib/workingCalendar";
 
 export interface AppState {
   // ----- reference
@@ -132,6 +132,20 @@ export interface AppState {
     projectNumber: string;
     period: Period;
   }) => void;
+  /**
+   * Create a placeholder "forecast role" for an `ambition` / `opportunity`
+   * project and seed monthly GfsHours for the requested periods. Returns the
+   * generated localNumber. Reuses the regular Employee + GfsHours plumbing so
+   * the project FTE chart and ARVE math just work.
+   */
+  addPlaceholderForProject: (args: {
+    projectNumber: string;
+    role: string;
+    puCode?: string;
+    gradeCode?: string;
+    fte: number;
+    periods: Period[];
+  }) => string | null;
 
   addProject: (p: Omit<Project, "tags"> & { tags?: string[] }) => void;
   updateProject: (projectNumber: string, patch: Partial<Omit<Project, "projectNumber">>) => void;
@@ -294,6 +308,7 @@ function initialState(): Omit<AppState, keyof {
   transferEmployee: unknown;
   assignEmployeeToProject: unknown;
   unassignEmployeeFromProject: unknown;
+  addPlaceholderForProject: unknown;
   addProject: unknown;
   updateProject: unknown;
   setWorkingCalendarEntry: unknown;
@@ -655,6 +670,77 @@ export const useAppStore = create<AppState>()(
           ts: new Date().toISOString(),
         };
         set({ gfsHours: next, audit: [audit, ...get().audit].slice(0, 2000) });
+      },
+
+      addPlaceholderForProject: ({ projectNumber, role, puCode, gradeCode, fte, periods }) => {
+        const project = get().projects.find((p) => p.projectNumber === projectNumber);
+        if (!project) return null;
+        if (project.kind !== "ambition" && project.kind !== "opportunity") return null;
+        const cleanRole = role.trim() || "Forecast role";
+        const fteVal = Math.max(0, fte);
+        const distinctPeriods = Array.from(new Set(periods)).sort();
+        if (fteVal <= 0 || distinctPeriods.length === 0) return null;
+
+        const now = new Date().toISOString();
+        const actor = get().user.name;
+        const localNumber = `PH-${uid("").slice(-8).toUpperCase()}`;
+        const defaultPu = get().productionUnits.find((u) => !u.isVirtual && u.active)?.code ?? "";
+        const employee: Employee = {
+          localNumber,
+          firstName: cleanRole,
+          lastName: `· ${project.projectNumber}`,
+          displayName: `${cleanRole} · ${project.name}`,
+          puCode: puCode || defaultPu,
+          gradeCode: gradeCode || (get().grades[1]?.code ?? "B1"),
+          jobFunction: "CSS",
+          locationCode: get().locations[0]?.code ?? "",
+          startDate: `${distinctPeriods[0]}-01`,
+          fteCapacity: 1,
+          engagement: "Forecast",
+          skills: [],
+          isPlaceholder: true,
+          placeholderRole: cleanRole,
+        };
+
+        const calIdx = indexWorkingCalendar(get().workingCalendar);
+        const newRows: GfsHours[] = distinctPeriods.map((period) => {
+          const fullHours = hoursForPeriod(calIdx, period);
+          return {
+            employeeLocalNumber: localNumber,
+            period,
+            projectNumber,
+            projectType: project.isBillable ? "DEL" : "INT",
+            hours: fullHours > 0 ? Math.round(fteVal * fullHours) : 0,
+          };
+        });
+
+        const audits: AuditEntry[] = [
+          {
+            id: uid("au-"),
+            actor,
+            entityType: "employee",
+            entityId: localNumber,
+            action: "create",
+            after: { placeholder: true, role: cleanRole, project: projectNumber },
+            ts: now,
+          },
+          ...newRows.map((row) => ({
+            id: uid("au-"),
+            actor,
+            entityType: "gfs_hours" as const,
+            entityId: `${localNumber}::${projectNumber}::${row.period}`,
+            action: "create" as const,
+            after: row,
+            ts: now,
+          })),
+        ];
+
+        set({
+          employees: [employee, ...get().employees],
+          gfsHours: [...get().gfsHours, ...newRows],
+          audit: [...audits, ...get().audit].slice(0, 2000),
+        });
+        return localNumber;
       },
 
       addProject: (p) => {

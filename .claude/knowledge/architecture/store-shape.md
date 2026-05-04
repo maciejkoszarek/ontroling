@@ -27,9 +27,9 @@ duplicate selectors without cutting re-renders.
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `employees` | `Employee[]` | current roster; mutated by `addEmployee`, `transferEmployee`, `setEmployeeCapabilities`, `setEmployeeGermanSpeaker`, `setEmployeeClearanceLevel` |
-| `snapshots` | `EmployeeMonthSnapshot[]` | per-employee-per-month observations |
-| `gfsHours` | `GfsHours[]` | timesheet rows; mutated by `assignEmployeeToProject` / `unassignEmployeeFromProject` |
+| `employees` | `Employee[]` | current roster; mutated by `addEmployee`, `transferEmployee`, `addPlaceholderForProject`, `setEmployeeCapabilities`, `setEmployeeGermanSpeaker`, `setEmployeeClearanceLevel`. Rows with `isPlaceholder: true` are forecast-only roles (see `placeholderRole`) — excluded from People directory, attrition, and capability mgmt; included in `gfsHours` and the project FTE chart |
+| `snapshots` | `EmployeeMonthSnapshot[]` | per-employee-per-month observations (placeholders never have snapshots) |
+| `gfsHours` | `GfsHours[]` | timesheet rows; mutated by `assignEmployeeToProject` / `unassignEmployeeFromProject` / `addPlaceholderForProject` |
 | `joiners` / `leavers` | `Joiner[]` / `Leaver[]` | people-flow entries via `addJoiner` / `addLeaver`; `addJoiner` can materialize an `Employee` when `status === "actual"` |
 | `contractOfMandate` | `ContractOfMandate[]` | UZ contractor markers |
 | `transfers` | `Transfer[]` | inter-PU moves recorded by `transferEmployee` |
@@ -86,9 +86,13 @@ Categories:
   `"validation-clamp"` audit entry when the value was coerced. Live writes to
   locked/archived cycles are rejected by the guard (I17).
 - **People-flow**: `addEmployee`, `addJoiner`, `addLeaver`, `transferEmployee`,
-  `assignEmployeeToProject`, `unassignEmployeeFromProject`. `addJoiner` will
+  `assignEmployeeToProject`, `unassignEmployeeFromProject`,
+  `addPlaceholderForProject`. `addJoiner` will
   materialize an `Employee` when the joiner is `status === "actual"` with a
-  `localNumber` that does not already exist.
+  `localNumber` that does not already exist. `addPlaceholderForProject` is
+  scoped to `ambition` / `opportunity` projects: it creates an `Employee` with
+  `isPlaceholder: true` plus monthly `GfsHours` rows across the requested
+  period range, and is the only entry point that should set `isPlaceholder`.
 - **Projects**: `addProject`, `updateProject` — validate that the
   `projectNumber` is unique (I15), trim strings, append audit. Both manage
   `Project.commitProbability` (I30): `addProject` applies kind defaults

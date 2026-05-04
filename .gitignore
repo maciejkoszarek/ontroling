@@ -32,3 +32,4 @@ pnpm-debug.log*
 # Claude Code local state (shareable config is tracked)
 .claude/settings.local.json
 .claude/projects/
+.claude/worktrees/

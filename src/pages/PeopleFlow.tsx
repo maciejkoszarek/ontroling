@@ -53,7 +53,8 @@ export default function PeopleFlow() {
   // Rolling 12m attrition %
   const last12 = rollingPeriods.filter((p) => p > periodAdd(DEMO_ANCHOR_PERIOD, -12) && p <= DEMO_ANCHOR_PERIOD);
   const lastYearLeavers = last12.reduce((a, p) => a + (leaversByPeriod[p]?.length ?? 0), 0);
-  const attritionPct = employees.length === 0 ? 0 : lastYearLeavers / employees.length;
+  const realEmployeeCount = employees.filter((e) => !e.isPlaceholder).length;
+  const attritionPct = realEmployeeCount === 0 ? 0 : lastYearLeavers / realEmployeeCount;
 
   const joinerSeries = rollingPeriods.map((p) => joinersByPeriod[p]?.length ?? 0);
   const leaverSeries = rollingPeriods.map((p) => leaversByPeriod[p]?.length ?? 0);

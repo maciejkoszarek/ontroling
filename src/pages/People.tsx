@@ -319,13 +319,15 @@ export default function People() {
   }
 
   const enriched = useMemo(() => {
-    return employees.map((e) => {
-      const arve = trailingArve(e.localNumber, DEMO_ANCHOR_PERIOD, snapshots, 3);
-      const currentAssignments = employeeProjectsForPeriod(e.localNumber, DEMO_ANCHOR_PERIOD, gfsHours);
-      const totalHours = currentAssignments.reduce((s, a) => s + a.hours, 0);
-      const uniqueProjects = Array.from(new Set(currentAssignments.map((a) => a.projectNumber)));
-      return { e, arve, totalHours, projectNumbers: uniqueProjects };
-    });
+    return employees
+      .filter((e) => !e.isPlaceholder)
+      .map((e) => {
+        const arve = trailingArve(e.localNumber, DEMO_ANCHOR_PERIOD, snapshots, 3);
+        const currentAssignments = employeeProjectsForPeriod(e.localNumber, DEMO_ANCHOR_PERIOD, gfsHours);
+        const totalHours = currentAssignments.reduce((s, a) => s + a.hours, 0);
+        const uniqueProjects = Array.from(new Set(currentAssignments.map((a) => a.projectNumber)));
+        return { e, arve, totalHours, projectNumbers: uniqueProjects };
+      });
   }, [employees, snapshots, gfsHours]);
 
   const filtered = useMemo(() => {

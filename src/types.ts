@@ -92,6 +92,15 @@ export interface Employee {
   capabilities?: string[]; // Capability ids
   germanSpeaker?: boolean;
   clearanceLevel?: ClearanceLevel;
+  /**
+   * Forecast-only placeholder for unstaffed demand on `ambition` /
+   * `opportunity` projects (e.g. "Senior consultant we don't have yet").
+   * Excluded from practice headcount, attrition, and the People directory;
+   * still flows into project FTE demand and the project ARVE chart.
+   */
+  isPlaceholder?: boolean;
+  /** Free-text role label, e.g. "Senior consultant", "Cloud architect". Only meaningful when `isPlaceholder`. */
+  placeholderRole?: string;
 }
 
 export interface EmployeeMonthSnapshot {

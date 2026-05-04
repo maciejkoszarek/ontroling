@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAppStore } from "../../store";
 import { leafPuCodes, puByCode, rollingPeriods } from "../../lib/demoData";
-import { uid, currentPeriod, cn } from "../../lib/utils";
+import { uid, currentPeriod, periodRange, cn } from "../../lib/utils";
 import { hoursForPeriod } from "../../lib/workingCalendar";
 import type { ClearanceLevel, Employee, JobFunction, Period } from "../../types";
 import Modal, { FieldRow } from "../Modal";
@@ -306,7 +306,7 @@ export function AddLeaverModal({
   const addLeaver = useAppStore((s) => s.addLeaver);
   const employees = useAppStore((s) => s.employees);
 
-  const active = useMemo(() => employees.filter((e) => !e.endDate), [employees]);
+  const active = useMemo(() => employees.filter((e) => !e.endDate && !e.isPlaceholder), [employees]);
   const [localNumber, setLocalNumber] = useState<string>(preselectLocalNumber ?? active[0]?.localNumber ?? "");
   const [endDate, setEndDate] = useState<string>(`${currentPeriod()}-28`);
   const [reason, setReason] = useState<"voluntary" | "involuntary" | "contract_end" | "other">("voluntary");
@@ -404,7 +404,7 @@ export function TransferModal({
 }: CommonProps & { preselectLocalNumber?: string }) {
   const transferEmployee = useAppStore((s) => s.transferEmployee);
   const employees = useAppStore((s) => s.employees);
-  const active = useMemo(() => employees.filter((e) => !e.endDate), [employees]);
+  const active = useMemo(() => employees.filter((e) => !e.endDate && !e.isPlaceholder), [employees]);
 
   const [localNumber, setLocalNumber] = useState<string>(preselectLocalNumber ?? "");
   const [toPuCode, setToPuCode] = useState<string>(leafPuCodes[0] ?? "");
@@ -507,7 +507,7 @@ export function AssignProjectModal({
   const projects = useAppStore((s) => s.projects);
   const employees = useAppStore((s) => s.employees);
   const workingCalendar = useAppStore((s) => s.workingCalendar);
-  const active = useMemo(() => employees.filter((e: Employee) => !e.endDate), [employees]);
+  const active = useMemo(() => employees.filter((e: Employee) => !e.endDate && !e.isPlaceholder), [employees]);
 
   const [localNumber, setLocalNumber] = useState(preselectLocalNumber ?? "");
   const [projectNumber, setProjectNumber] = useState(preselectProjectNumber ?? projects[0]?.projectNumber ?? "");
@@ -618,6 +618,155 @@ export function AssignProjectModal({
           </FieldRow>
         </div>
       </div>
+    </Modal>
+  );
+}
+
+/* -------------------- Add forecast role (placeholder) -------------------- */
+
+export function AddPlaceholderModal({
+  open,
+  onClose,
+  projectNumber,
+}: CommonProps & { projectNumber: string }) {
+  const addPlaceholder = useAppStore((s) => s.addPlaceholderForProject);
+  const grades = useAppStore((s) => s.grades);
+  const project = useAppStore((s) => s.projects.find((p) => p.projectNumber === projectNumber));
+
+  const [role, setRole] = useState("Senior consultant");
+  const defaultStart = currentPeriod();
+  const defaultEnd = (() => {
+    const [y, m] = defaultStart.split("-").map(Number);
+    const d = new Date(y, m - 1 + 5, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  })();
+  const [puCode, setPuCode] = useState<string>(leafPuCodes[0] ?? "");
+  const [gradeCode, setGradeCode] = useState<string>(grades[1]?.code ?? "B1");
+  const [fte, setFte] = useState<number>(1);
+  const [from, setFrom] = useState<Period>(defaultStart);
+  const [to, setTo] = useState<Period>(defaultEnd);
+
+  useEffect(() => {
+    if (!open) return;
+    setRole("Senior consultant");
+    setFte(1);
+    setFrom(defaultStart);
+    setTo(defaultEnd);
+    setPuCode(leafPuCodes[0] ?? "");
+    setGradeCode(grades[1]?.code ?? "B1");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, projectNumber]);
+
+  if (!project) return null;
+  const allowed = project.kind === "ambition" || project.kind === "opportunity";
+
+  const periods = from <= to ? periodRange(from, to) : [];
+  const monthCount = periods.length;
+
+  function submit() {
+    if (!role.trim() || fte <= 0 || periods.length === 0) return;
+    addPlaceholder({
+      projectNumber,
+      role: role.trim(),
+      puCode,
+      gradeCode,
+      fte,
+      periods,
+    });
+    onClose();
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Add forecast role"
+      subtitle={
+        allowed
+          ? "A placeholder person for unstaffed demand. Counts toward project FTE demand and ARVE; excluded from practice headcount."
+          : "Forecast roles are only available on ambition and opportunity projects."
+      }
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <button
+            className="btn-primary"
+            onClick={submit}
+            disabled={!allowed || !role.trim() || fte <= 0 || periods.length === 0}
+            title={
+              !allowed
+                ? "Only available on ambition / opportunity"
+                : periods.length === 0
+                  ? "From must be ≤ To"
+                  : undefined
+            }
+          >
+            Add forecast role
+          </button>
+        </>
+      }
+    >
+      {!allowed ? (
+        <p className="text-sm text-fg-muted">
+          This project is kind <span className="font-medium">{project.kind}</span>. Forecast roles
+          are only available on ambition / opportunity projects — confirmed projects should be
+          staffed with real people.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          <FieldRow label="Role label" required hint="What kind of person you'd need — e.g. 'Senior consultant', 'Cloud architect'.">
+            <input className="input" value={role} onChange={(e) => setRole(e.target.value)} />
+          </FieldRow>
+          <div className="grid grid-cols-2 gap-3">
+            <FieldRow label="PU (preferred)">
+              <select className="input" value={puCode} onChange={(e) => setPuCode(e.target.value)}>
+                {leafPuCodes.map((code) => {
+                  const pu = puByCode.get(code);
+                  return (
+                    <option key={code} value={code}>
+                      {pu ? `${pu.shortName} · ${pu.displayName}` : code}
+                    </option>
+                  );
+                })}
+              </select>
+            </FieldRow>
+            <FieldRow label="Grade (preferred)">
+              <select className="input" value={gradeCode} onChange={(e) => setGradeCode(e.target.value)}>
+                {grades.map((g) => (
+                  <option key={g.code} value={g.code}>{g.code} · {g.family}</option>
+                ))}
+              </select>
+            </FieldRow>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <FieldRow label="From" required>
+              <select className="input" value={from} onChange={(e) => setFrom(e.target.value)}>
+                {rollingPeriods.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            </FieldRow>
+            <FieldRow label="To" required>
+              <select className="input" value={to} onChange={(e) => setTo(e.target.value)}>
+                {rollingPeriods.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            </FieldRow>
+            <FieldRow label="FTE / month" required hint={`${monthCount} month${monthCount === 1 ? "" : "s"} · ${(fte * monthCount).toFixed(1)} FTE-months total`}>
+              <input
+                type="number"
+                step="0.1"
+                min={0}
+                max={1.2}
+                className="input"
+                value={fte}
+                onChange={(e) => setFte(parseFloat(e.target.value) || 0)}
+              />
+            </FieldRow>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }

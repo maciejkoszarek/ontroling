@@ -4,11 +4,11 @@ import { useAppStore } from "../store";
 import { aggregateProjects, getCommitProbability, yearPeriods, employeeMap } from "../lib/projectHelpers";
 import { hoursForPeriod, indexWorkingCalendar } from "../lib/workingCalendar";
 import { cn, formatNumber, formatPct, activeCycleYear } from "../lib/utils";
-import { ArrowLeft, ArrowDown, ArrowUp, Briefcase, Building2, ChevronDown, ChevronRight, Users, UserPlus, Pencil } from "lucide-react";
+import { ArrowLeft, ArrowDown, ArrowUp, Briefcase, Building2, ChevronDown, ChevronRight, Sparkles, Users, UserPlus, Pencil } from "lucide-react";
 import ReactECharts from "echarts-for-react";
 import KpiCard from "../components/KpiCard";
 import { DEMO_ANCHOR_PERIOD, puLabel } from "../lib/demoData";
-import { AssignProjectModal } from "../components/forms/PeopleForms";
+import { AddPlaceholderModal, AssignProjectModal } from "../components/forms/PeopleForms";
 import { ProjectFormModal } from "../components/forms/ProjectForms";
 
 export default function ProjectDetail() {
@@ -43,6 +43,7 @@ export default function ProjectDetail() {
   const avgMonthlyHours = yearFullHours / 12 || 160;
   const [selectedPeriod, setSelectedPeriod] = useState(activePeriod ?? DEMO_ANCHOR_PERIOD);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [placeholderOpen, setPlaceholderOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [showUnit, setShowUnit] = useState<"hours" | "fte">("hours");
   const [editingCell, setEditingCell] = useState<{ localNumber: string; period: string } | null>(null);
@@ -380,6 +381,15 @@ export default function ProjectDetail() {
           <button className="btn" onClick={() => setEditOpen(true)}>
             <Pencil className="w-4 h-4" /> Edit
           </button>
+          {(project.kind === "ambition" || project.kind === "opportunity") && (
+            <button
+              className="btn"
+              onClick={() => setPlaceholderOpen(true)}
+              title="Add a placeholder person for unstaffed forecast demand"
+            >
+              <Sparkles className="w-4 h-4" /> Add forecast role
+            </button>
+          )}
           <button className="btn-primary" onClick={() => setAssignOpen(true)}>
             <UserPlus className="w-4 h-4" /> Assign person
           </button>
@@ -396,6 +406,12 @@ export default function ProjectDetail() {
         open={assignOpen}
         onClose={() => setAssignOpen(false)}
         preselectProjectNumber={project.projectNumber}
+      />
+
+      <AddPlaceholderModal
+        open={placeholderOpen}
+        onClose={() => setPlaceholderOpen(false)}
+        projectNumber={project.projectNumber}
       />
 
       <ProjectFormModal open={editOpen} onClose={() => setEditOpen(false)} editing={project} />
@@ -615,9 +631,19 @@ export default function ProjectDetail() {
                     return (
                       <tr key={r.localNumber} className="hover:bg-bg-hover group">
                         <td className="table-td sticky left-0 bg-bg-card z-10 group-hover:bg-bg-hover">
-                          <Link to={`/people/${e.localNumber}`} className="font-medium hover:text-brand">
-                            {e.displayName}
-                          </Link>
+                          <div className="flex items-center gap-1.5">
+                            <Link to={`/people/${e.localNumber}`} className="font-medium hover:text-brand">
+                              {e.displayName}
+                            </Link>
+                            {e.isPlaceholder && (
+                              <span
+                                className="chip !text-[10px] inline-flex items-center gap-1 border-dashed"
+                                title="Forecast placeholder — not an onboarded person"
+                              >
+                                <Sparkles className="w-3 h-3" /> forecast
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[10px] text-fg-muted font-mono">{e.localNumber}</div>
                         </td>
                         <td className="table-td text-fg-muted">

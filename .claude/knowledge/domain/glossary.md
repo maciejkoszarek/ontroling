@@ -78,6 +78,14 @@ contractor flag in [src/types.ts:32](src/types.ts).
 
 **Location** — `WRO`, `POZ`, `GDN`, `WAW`, `KRK`, `REMOTE` (all PL).
 
+**Forecast role / placeholder** — A non-onboarded "person" used to forecast
+demand on `ambition` / `opportunity` projects. Stored as an `Employee` with
+`isPlaceholder: true` and a free-text `placeholderRole` (e.g. "Senior
+consultant"). Created via `addPlaceholderForProject` in the store. Counts
+toward project FTE demand and ARVE; **excluded** from practice headcount, the
+People directory, attrition (`PeopleFlow.tsx`), and capability assignment.
+Surfaced as a card on the Projects page when at least one placeholder exists.
+
 ## Cycle lifecycle
 
 A forecast **cycle** (e.g. "FC April 2026") has this state machine:

@@ -2,8 +2,9 @@ import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAppStore } from "../store";
 import { cn, formatNumber, activeCycleYear } from "../lib/utils";
-import { ArrowDown, ArrowUp, Briefcase, ChevronDown, ChevronRight, Lightbulb, Pencil, Plus, Search, Target } from "lucide-react";
+import { ArrowDown, ArrowUp, Briefcase, ChevronDown, ChevronRight, Lightbulb, Pencil, Plus, Search, Sparkles, Target } from "lucide-react";
 import { aggregateProjects, getCommitProbability, yearPeriods } from "../lib/projectHelpers";
+import { hoursForPeriod, indexWorkingCalendar } from "../lib/workingCalendar";
 import { ProjectFormModal } from "../components/forms/ProjectForms";
 import type { Project, ProjectKind } from "../types";
 
@@ -35,6 +36,7 @@ const KIND_ICON: Record<ProjectKind, React.ComponentType<{ className?: string }>
 
 export default function Projects() {
   const projects = useAppStore((s) => s.projects);
+  const employees = useAppStore((s) => s.employees);
   const mus = useAppStore((s) => s.marketUnits);
   const gfsHours = useAppStore((s) => s.gfsHours);
   const snapshots = useAppStore((s) => s.snapshots);
@@ -240,6 +242,52 @@ export default function Projects() {
     return counts;
   }, [projects]);
 
+  const placeholderSummary = useMemo(() => {
+    const phByLocal = new Map<string, true>();
+    for (const e of employees) if (e.isPlaceholder) phByLocal.set(e.localNumber, true);
+    if (phByLocal.size === 0) {
+      return { byKind: { ambition: 0, opportunity: 0 } as Record<"ambition" | "opportunity", number>, totalCurrent: 0, totalYear: 0, count: 0, byProject: [] as Array<{ p: Project; fte: number; currentFte: number }> };
+    }
+    const calIdx = indexWorkingCalendar(workingCalendar);
+    const projectByNumber = new Map(projects.map((p) => [p.projectNumber, p]));
+    const byKind: Record<"ambition" | "opportunity", number> = { ambition: 0, opportunity: 0 };
+    const byProjectMap = new Map<string, { p: Project; fteByPeriod: Map<string, number> }>();
+    let totalCurrent = 0;
+    for (const g of gfsHours) {
+      if (!phByLocal.has(g.employeeLocalNumber)) continue;
+      const proj = projectByNumber.get(g.projectNumber);
+      if (!proj) continue;
+      if (proj.kind !== "ambition" && proj.kind !== "opportunity") continue;
+      const fullHours = hoursForPeriod(calIdx, g.period);
+      const fte = fullHours > 0 ? g.hours / fullHours : 0;
+      if (g.period.startsWith(`${year}-`)) {
+        byKind[proj.kind] += fte;
+      }
+      if (g.period === activePeriod) totalCurrent += fte;
+      let bucket = byProjectMap.get(proj.projectNumber);
+      if (!bucket) {
+        bucket = { p: proj, fteByPeriod: new Map() };
+        byProjectMap.set(proj.projectNumber, bucket);
+      }
+      bucket.fteByPeriod.set(g.period, (bucket.fteByPeriod.get(g.period) ?? 0) + fte);
+    }
+    const byProject = Array.from(byProjectMap.values())
+      .map(({ p, fteByPeriod }) => {
+        let yearFte = 0;
+        for (const [period, fte] of fteByPeriod) if (period.startsWith(`${year}-`)) yearFte += fte;
+        const currentFte = activePeriod ? fteByPeriod.get(activePeriod) ?? 0 : 0;
+        return { p, fte: yearFte, currentFte };
+      })
+      .sort((a, b) => b.fte - a.fte);
+    return {
+      byKind,
+      totalCurrent,
+      totalYear: byKind.ambition + byKind.opportunity,
+      count: phByLocal.size,
+      byProject,
+    };
+  }, [employees, gfsHours, projects, workingCalendar, year, activePeriod]);
+
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -268,6 +316,59 @@ export default function Projects() {
           );
         })}
       </div>
+
+      {placeholderSummary.count > 0 && (
+        <div className="card p-4">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="text-sm font-semibold flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-brand" />
+                Forecast roles on ambition + opportunity
+              </h2>
+              <p className="text-xs text-fg-muted mt-0.5">
+                Placeholder people for unstaffed demand. Excluded from practice headcount; counted in project FTE demand.
+              </p>
+            </div>
+            <div className="flex items-center gap-4 tabular-nums">
+              <div className="text-right">
+                <div className="text-[11px] uppercase tracking-wider text-fg-muted">Roles</div>
+                <div className="text-lg font-semibold">{placeholderSummary.count}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-[11px] uppercase tracking-wider text-fg-muted">{activePeriod ?? "Current"}</div>
+                <div className="text-lg font-semibold">{formatNumber(placeholderSummary.totalCurrent, 1)} FTE</div>
+              </div>
+              <div className="text-right">
+                <div className="text-[11px] uppercase tracking-wider text-fg-muted">{year} total</div>
+                <div className="text-lg font-semibold">{formatNumber(placeholderSummary.totalYear, 1)} FTE-mo</div>
+              </div>
+            </div>
+          </div>
+          <div className="mt-3 flex items-center gap-2 flex-wrap text-xs">
+            <span className="chip">
+              Opportunity <span className="ml-1 tabular-nums">{formatNumber(placeholderSummary.byKind.opportunity, 1)}</span>
+            </span>
+            <span className="chip">
+              Ambition <span className="ml-1 tabular-nums">{formatNumber(placeholderSummary.byKind.ambition, 1)}</span>
+            </span>
+            <span className="text-fg-muted">·</span>
+            {placeholderSummary.byProject.slice(0, 6).map(({ p, fte }) => (
+              <Link
+                key={p.projectNumber}
+                to={`/projects/${p.projectNumber}`}
+                className="chip hover:bg-brand/10 hover:text-brand"
+                title={`${p.name} — ${formatNumber(fte, 1)} FTE-months in ${year}`}
+              >
+                {p.name}
+                <span className="ml-1 tabular-nums opacity-70">{formatNumber(fte, 1)}</span>
+              </Link>
+            ))}
+            {placeholderSummary.byProject.length > 6 && (
+              <span className="text-fg-muted">+{placeholderSummary.byProject.length - 6} more</span>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="card p-3 flex items-center gap-2 flex-wrap">
         <div className="flex items-center gap-2 flex-1 min-w-[200px]">

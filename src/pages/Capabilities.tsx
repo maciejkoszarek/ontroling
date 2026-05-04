@@ -93,7 +93,7 @@ export default function Capabilities() {
     setEmployeeCapabilities(localNumber, next);
   }
 
-  const activeEmployees = useMemo(() => employees.filter((e) => !e.endDate), [employees]);
+  const activeEmployees = useMemo(() => employees.filter((e) => !e.endDate && !e.isPlaceholder), [employees]);
 
   return (
     <div className="space-y-4">
