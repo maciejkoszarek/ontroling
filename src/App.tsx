@@ -17,6 +17,8 @@ import Pipeline from "./pages/Pipeline";
 import Bench from "./pages/Bench";
 import Scenarios from "./pages/Scenarios";
 import Ingestion from "./pages/Ingestion";
+import HrImport from "./pages/HrImport";
+import HrImportResults from "./pages/HrImportResults";
 import Admin from "./pages/Admin";
 import Capabilities from "./pages/Capabilities";
 import DQ from "./pages/DQ";
@@ -51,6 +53,8 @@ export default function App() {
         <Route path="dq" element={<DQ />} />
         <Route path="review-pack" element={<ReviewPack />} />
         <Route path="ingestion" element={<Ingestion />} />
+        <Route path="ingest/hr" element={<HrImport />} />
+        <Route path="ingest/hr/results/:importId" element={<HrImportResults />} />
         <Route path="admin" element={<Admin />} />
         <Route path="capabilities" element={<Capabilities />} />
         <Route path="*" element={<Navigate to="/" replace />} />

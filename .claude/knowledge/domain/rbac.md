@@ -15,6 +15,9 @@ Five roles. The live capability matrix is rendered in
 | Edit forecast (any PU) | ✓ | — | — | — | — |
 | Approve cycle | ✓ | — | — | — | — |
 | Run ingestion | ✓ | — | — | — | — |
+| Edit HR mappings | ✓ | — | — | — | — |
+| Import HR data | ✓ | — | — | ✓ | — |
+| Override staleness on HR import | ✓ | — | — | — | — |
 | View employee PII | ✓ | ◐ | ✓ | ✓ | — |
 | View costs | ✓ | — | ✓ | — | — |
 | Create scenario | ✓ | ✓ | ✓ | — | — |

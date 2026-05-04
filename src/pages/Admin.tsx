@@ -5,6 +5,7 @@ import { Plus, Check, X, Lock, Archive, PenLine, ClipboardCheck, CalendarDays, R
 import type { CycleStatus, Role } from "../types";
 import { defaultEntryForPeriod, indexWorkingCalendar, yearPeriods } from "../lib/workingCalendar";
 import AdminDataBackup from "../components/AdminDataBackup";
+import HrMappingEditor from "../components/admin/HrMappingEditor";
 
 const ROLES: Array<{ value: Role; label: string }> = [
   { value: "controller", label: "Controller" },
@@ -199,6 +200,16 @@ export default function Admin() {
         </div>
       </div>
 
+      <div>
+        <div className="mb-2">
+          <h2 className="text-sm font-semibold">HR Mapping</h2>
+          <p className="text-[11px] text-fg-muted">
+            Source HR-file values mapped to PracticeView&apos;s nice names. Used by the HR Database import.
+          </p>
+        </div>
+        <HrMappingEditor />
+      </div>
+
       <div className="card p-4">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h2 className="text-sm font-semibold flex items-center gap-2">
@@ -357,6 +368,9 @@ const RBAC_ROWS: Array<{ cap: string; access: Array<"full" | "partial" | "none">
   { cap: "Edit forecast (any PU)", access: ["full", "none", "none", "none", "none"] },
   { cap: "Approve cycle", access: ["full", "none", "none", "none", "none"] },
   { cap: "Run ingestion", access: ["full", "none", "none", "none", "none"] },
+  { cap: "Edit HR mappings", access: ["full", "none", "none", "none", "none"] },
+  { cap: "Import HR data", access: ["full", "none", "none", "full", "none"] },
+  { cap: "Override staleness on HR import", access: ["full", "none", "none", "none", "none"] },
   { cap: "View employee PII", access: ["full", "partial", "full", "full", "none"] },
   { cap: "View costs", access: ["full", "none", "full", "none", "none"] },
   { cap: "Create scenario", access: ["full", "full", "full", "none", "none"] },

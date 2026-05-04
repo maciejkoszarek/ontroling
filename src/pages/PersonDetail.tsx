@@ -8,6 +8,7 @@ import { HOURS_PER_WORKING_DAY } from "../lib/workingDays";
 import { buildDaysByPeriod, buildHoursByPeriod } from "../lib/workingCalendar";
 import ReactECharts from "echarts-for-react";
 import { AddLeaverModal, AssignProjectModal, TransferModal } from "../components/forms/PeopleForms";
+import EmployeeChangeHistory from "../components/people/EmployeeChangeHistory";
 
 function EditableHourCell({
   hours,
@@ -293,6 +294,8 @@ export default function PersonDetail() {
           </ul>
         </div>
       )}
+
+      <EmployeeChangeHistory localNumber={localNumber} />
 
       <div className="card p-4">
         <h2 className="text-sm font-semibold mb-2">ARVE trend</h2>

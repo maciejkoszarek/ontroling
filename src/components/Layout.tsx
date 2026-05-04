@@ -21,13 +21,16 @@ import {
   Sun,
   Sparkles,
   Tag,
+  UserCog,
 } from "lucide-react";
 import { useAppStore } from "../store";
 import TopBar from "./TopBar";
 import FilterBar from "./FilterBar";
 import { cn, initials } from "../lib/utils";
 
-const NAV: Array<{ section: string; items: Array<{ to: string; label: string; icon: typeof LayoutDashboard }> }> = [
+type NavItem = { to: string; label: string; icon: typeof LayoutDashboard; requireHrImport?: boolean };
+
+const NAV: Array<{ section: string; items: NavItem[] }> = [
   {
     section: "Overview",
     items: [
@@ -68,6 +71,7 @@ const NAV: Array<{ section: string; items: Array<{ to: string; label: string; ic
     items: [
       { to: "/dq", label: "Data quality", icon: ShieldCheck },
       { to: "/ingestion", label: "Ingestion", icon: Upload },
+      { to: "/ingest/hr", label: "HR Import", icon: UserCog, requireHrImport: true },
       { to: "/admin", label: "Admin", icon: Settings },
     ],
   },
@@ -96,8 +100,14 @@ export default function Layout() {
 function Sidebar({ mobileOpen }: { mobileOpen: boolean }) {
   const user = useAppStore((s) => s.user);
   const role = useAppStore((s) => s.role);
+  const canImportHr = useAppStore((s) => s.canImportHr);
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
+
+  const visibleNav = NAV.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => !item.requireHrImport || canImportHr(role)),
+  }));
 
   return (
     <aside
@@ -118,7 +128,7 @@ function Sidebar({ mobileOpen }: { mobileOpen: boolean }) {
       </div>
 
       <nav className="flex-1 overflow-auto py-3 px-2">
-        {NAV.map((group) => (
+        {visibleNav.map((group) => (
           <div key={group.section} className="mb-4">
             <div className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-fg-subtle">
               {group.section}
